@@ -26,3 +26,9 @@ Database Development Team
 ## Project Status
 
 Development environment setup in progress.
+
+## TEAM MEMBERS 
+1: AHMAD HASSAN
+2: ABDUL MOIZ
+3: HAFIZ ABDULLAH 
+4: ABDUL REHMAN
