@@ -275,3 +275,310 @@ VALUES
 );
 
 COMMIT;
+
+-- =====================================
+-- SAMPLE DATA: VISITOR
+-- =====================================
+
+-- Visitor 1: Completed visit
+
+INSERT INTO VISITOR
+(
+    VISITOR_ID,
+    VISITOR_NAME,
+    CNIC_NUMBER,
+    VEHICLE_REGISTRATION,
+    ENTRY_TIME,
+    EXIT_TIME,
+    PURPOSE_OF_VISIT,
+    HOUSE_ID
+)
+VALUES
+(
+    1,
+    'BILAL AHMED',
+    '3520212345675',
+    'LEC-9876',
+    SYSDATE - (2/24),
+    SYSDATE - (1/24),
+    'PERSONAL VISIT',
+    1
+);
+
+
+-- Visitor 2: Currently inside society
+
+INSERT INTO VISITOR
+(
+    VISITOR_ID,
+    VISITOR_NAME,
+    CNIC_NUMBER,
+    VEHICLE_REGISTRATION,
+    ENTRY_TIME,
+    PURPOSE_OF_VISIT,
+    HOUSE_ID
+)
+VALUES
+(
+    2,
+    'USMAN KHAN',
+    '3520212345676',
+    NULL,
+    SYSDATE,
+    'FAMILY VISIT',
+    1
+);
+
+COMMIT;
+
+
+-- =====================================
+-- SAMPLE DATA: MAINTENANCE_BILL
+-- =====================================
+
+-- BILL 1: CURRENT MONTH, UNPAID
+
+INSERT INTO MAINTENANCE_BILL
+(
+    BILL_ID,
+    BILLING_MONTH,
+    TOTAL_AMOUNT,
+    DUE_DATE,
+    PAYMENT_STATUS,
+    HOUSE_ID,
+    EMPLOYEE_ID
+)
+VALUES
+(
+    1,
+    TRUNC(SYSDATE, 'MM'),
+    5000,
+    TRUNC(SYSDATE, 'MM') + 15,
+    'UNPAID',
+    1,
+    1
+);
+
+
+-- BILL 2: PREVIOUS MONTH, PAID
+
+INSERT INTO MAINTENANCE_BILL
+(
+    BILL_ID,
+    BILLING_MONTH,
+    TOTAL_AMOUNT,
+    DUE_DATE,
+    PAYMENT_STATUS,
+    PAYMENT_DATE,
+    PAYMENT_METHOD,
+    HOUSE_ID,
+    EMPLOYEE_ID
+)
+VALUES
+(
+    2,
+    ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1),
+    5000,
+    ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1) + 15,
+    'PAID',
+    ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -1) + 10,
+    'CASH',
+    1,
+    1
+);
+
+COMMIT;
+
+-- =====================================
+-- SAMPLE DATA: COMPLAINT
+-- =====================================
+
+-- COMPLAINT 1: OPEN COMPLAINT
+
+INSERT INTO COMPLAINT
+(
+    COMPLAINT_ID,
+    COMPLAINT_CATEGORY,
+    ISSUE_DESCRIPTION,
+    DATE_REPORTED,
+    COMPLAINT_STATUS,
+    HOUSE_ID
+)
+VALUES
+(
+    1,
+    'WATER SUPPLY',
+    'LOW WATER PRESSURE IN THE HOUSE',
+    SYSDATE,
+    'OPEN',
+    1
+);
+
+
+-- COMPLAINT 2: RESOLVED COMPLAINT
+
+INSERT INTO COMPLAINT
+(
+    COMPLAINT_ID,
+    COMPLAINT_CATEGORY,
+    ISSUE_DESCRIPTION,
+    DATE_REPORTED,
+    DATE_RESOLVED,
+    COMPLAINT_STATUS,
+    HOUSE_ID
+)
+VALUES
+(
+    2,
+    'ELECTRICITY',
+    'STREETLIGHT NOT WORKING NEAR HOUSE',
+    TRUNC(SYSDATE) - 10,
+    TRUNC(SYSDATE) - 8,
+    'RESOLVED',
+    1
+);
+
+COMMIT;
+
+-- ADDITIONAL SAMPLE EMPLOYEE
+
+INSERT INTO EMPLOYEE
+(
+    EMPLOYEE_ID,
+    EMP_FULL_NAME,
+    JOB_ROLE,
+    SHIFT_TIMING,
+    MONTHLY_SALARY,
+    CONTACT_NUMBER,
+    CNIC_NUMBER
+)
+VALUES
+(
+    2,
+    'HASSAN RAZA',
+    'MAINTENANCE TECHNICIAN',
+    '09:00 - 17:00',
+    50000,
+    '03009876543',
+    '3520212345677'
+);
+
+
+-- =====================================
+-- SAMPLE DATA: COMPLAINT_ASSIGNMENT
+-- =====================================
+
+-- COMPLAINT 1 ASSIGNED TO EMPLOYEE 1
+
+INSERT INTO COMPLAINT_ASSIGNMENT
+(
+    COMPLAINT_ID,
+    EMPLOYEE_ID,
+    ASSIGNMENT_DATE,
+    ASSIGNMENT_STATUS
+)
+VALUES
+(
+    1,
+    1,
+    SYSDATE,
+    'ASSIGNED'
+);
+
+
+-- COMPLAINT 1 ASSIGNED TO EMPLOYEE 2
+
+INSERT INTO COMPLAINT_ASSIGNMENT
+(
+    COMPLAINT_ID,
+    EMPLOYEE_ID,
+    ASSIGNMENT_DATE,
+    ASSIGNMENT_STATUS
+)
+VALUES
+(
+    1,
+    2,
+    SYSDATE,
+    'ASSIGNED'
+);
+
+
+-- COMPLAINT 2 HANDLED BY EMPLOYEE 1
+
+INSERT INTO COMPLAINT_ASSIGNMENT
+(
+    COMPLAINT_ID,
+    EMPLOYEE_ID,
+    ASSIGNMENT_DATE,
+    ASSIGNMENT_STATUS
+)
+VALUES
+(
+    2,
+    1,
+    TRUNC(SYSDATE) - 9,
+    'COMPLETED'
+);
+
+COMMIT;
+
+
+-- =====================================
+-- SAMPLE DATA: BOOKING
+-- =====================================
+
+-- BOOKING 1: COMMUNITY HALL, PENDING
+-- TWO DAYS FROM TODAY, 10 AM TO 12 PM
+
+INSERT INTO BOOKING
+(
+    BOOKING_ID,
+    EVENT_TIME_START,
+    EVENT_TIME_END,
+    TOTAL_CALCULATED_FEE,
+    PAYMENT_STATUS,
+    BOOKING_STATUS,
+    FACILITY_ID,
+    HOUSE_ID
+)
+VALUES
+(
+    1,
+    TRUNC(SYSDATE) + 2 + (10/24),
+    TRUNC(SYSDATE) + 2 + (12/24),
+    15000,
+    'UNPAID',
+    'PENDING',
+    1,
+    1
+);
+
+
+-- BOOKING 2: GYMNASIUM, APPROVED
+-- THREE DAYS FROM TODAY, 4 PM TO 5 PM
+
+INSERT INTO BOOKING
+(
+    BOOKING_ID,
+    EVENT_TIME_START,
+    EVENT_TIME_END,
+    TOTAL_CALCULATED_FEE,
+    PAYMENT_STATUS,
+    BOOKING_STATUS,
+    FACILITY_ID,
+    HOUSE_ID
+)
+VALUES
+(
+    2,
+    TRUNC(SYSDATE) + 3 + (16/24),
+    TRUNC(SYSDATE) + 3 + (17/24),
+    1000,
+    'PAID',
+    'APPROVED',
+    2,
+    1
+);
+
+COMMIT;
