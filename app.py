@@ -284,6 +284,112 @@ def edit_owner(owner_id):
         csrf_token=session["owner_csrf_token"]
     )
 
+@app.route("/owners/<int:owner_id>/delete", methods=["GET", "POST"])
+def delete_owner(owner_id):
+
+    # Create a security token for the confirmation form.
+    if "owner_csrf_token" not in session:
+        session["owner_csrf_token"] = secrets.token_urlsafe(32)
+
+    # Find the owner and check related records.
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT FIRST_NAME, LAST_NAME
+                FROM OWNER
+                WHERE OWNER_ID = :owner_id
+            """, {"owner_id": owner_id})
+
+            owner = cursor.fetchone()
+
+            if owner is None:
+                abort(404)
+
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM HOUSE
+                WHERE OWNER_ID = :owner_id
+            """, {"owner_id": owner_id})
+
+            house_count = cursor.fetchone()[0]
+
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM RESIDENT
+                WHERE OWNER_ID = :owner_id
+            """, {"owner_id": owner_id})
+
+            resident_count = cursor.fetchone()[0]
+
+    has_dependencies = house_count > 0 or resident_count > 0
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["owner_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        if has_dependencies:
+            flash(
+                "Cannot delete this owner because related "
+                "house or resident records exist.",
+                "warning"
+            )
+            return redirect(url_for("owners_page"))
+
+        try:
+            with get_connection() as connection:
+                with connection.cursor() as cursor:
+
+                    cursor.execute("""
+                        DELETE FROM OWNER
+                        WHERE OWNER_ID = :owner_id
+                    """, {"owner_id": owner_id})
+
+                    deleted_rows = cursor.rowcount
+
+                if deleted_rows == 1:
+                    connection.commit()
+
+            if deleted_rows == 0:
+                abort(404)
+
+            flash("Owner deleted successfully!", "success")
+            return redirect(url_for("owners_page"))
+
+        except oracledb.DatabaseError as exc:
+
+            error_code = getattr(exc.args[0], "code", None)
+
+            if error_code == 2292:
+                flash(
+                    "Deletion blocked: related records exist.",
+                    "warning"
+                )
+            else:
+                app.logger.exception("Owner deletion failed")
+                flash(
+                    "Database error. Owner was not deleted.",
+                    "danger"
+                )
+
+            return redirect(url_for("owners_page"))
+
+    return render_template(
+        "owner_delete.html",
+        owner_id=owner_id,
+        owner=owner,
+        house_count=house_count,
+        resident_count=resident_count,
+        has_dependencies=has_dependencies,
+        csrf_token=session["owner_csrf_token"]
+    )
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
