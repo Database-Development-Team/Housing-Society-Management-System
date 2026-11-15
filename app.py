@@ -175,6 +175,115 @@ def register_owner():
         csrf_token=session["owner_csrf_token"]
     )
 
+@app.route("/owners/<int:owner_id>/edit", methods=["GET", "POST"])
+def edit_owner(owner_id):
+
+    # Retrieve the existing owner.
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT FIRST_NAME, LAST_NAME, CNIC_NUMBER,
+                       MOBILE_NUMBER, EMAIL_ADDRESS
+                FROM OWNER
+                WHERE OWNER_ID = :owner_id
+            """, {"owner_id": owner_id})
+
+            owner = cursor.fetchone()
+
+    if owner is None:
+        abort(404)
+
+    # Reuse the form security token.
+    if "owner_csrf_token" not in session:
+        session["owner_csrf_token"] = secrets.token_urlsafe(32)
+
+    values = {
+        "first_name": owner[0],
+        "last_name": owner[1],
+        "cnic_number": owner[2],
+        "mobile_number": owner[3] or "",
+        "email_address": owner[4] or ""
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["owner_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        for field in (
+            "first_name", "last_name",
+            "mobile_number", "email_address"
+        ):
+            values[field] = request.form.get(field, "").strip()
+
+        if not values["first_name"] or not values["last_name"]:
+            error = "First and last names are required."
+
+        elif (
+            len(values["first_name"]) > 50
+            or len(values["last_name"]) > 50
+        ):
+            error = "Names cannot exceed 50 characters."
+
+        elif len(values["mobile_number"]) > 15:
+            error = "Mobile number is too long."
+
+        elif (
+            len(values["email_address"]) > 100
+            or (
+                values["email_address"]
+                and "@" not in values["email_address"]
+            )
+        ):
+            error = "Enter a valid email address."
+
+        else:
+            try:
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        cursor.execute("""
+                            UPDATE OWNER
+                            SET FIRST_NAME = :first_name,
+                                LAST_NAME = :last_name,
+                                MOBILE_NUMBER = :mobile_number,
+                                EMAIL_ADDRESS = :email_address
+                            WHERE OWNER_ID = :owner_id
+                        """, {
+                            "first_name": values["first_name"],
+                            "last_name": values["last_name"],
+                            "mobile_number": values["mobile_number"] or None,
+                            "email_address": values["email_address"] or None,
+                            "owner_id": owner_id
+                        })
+
+                        if cursor.rowcount == 0:
+                            abort(404)
+
+                    connection.commit()
+
+                flash("Owner updated successfully!", "success")
+                return redirect(url_for("owners_page"))
+
+            except oracledb.DatabaseError:
+                app.logger.exception("Owner update failed")
+                error = "Database error. Owner was not updated."
+
+    return render_template(
+        "owner_edit.html",
+        owner_id=owner_id,
+        values=values,
+        error=error,
+        csrf_token=session["owner_csrf_token"]
+    )
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

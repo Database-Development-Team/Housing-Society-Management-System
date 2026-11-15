@@ -59,6 +59,7 @@
                             <th>Last Name</th>
                             <th>Mobile Number</th>
                             <th>Email Address</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
 
@@ -70,10 +71,17 @@
                             <td>{{ owner.last_name }}</td>
                             <td>{{ owner.mobile_number }}</td>
                             <td>{{ owner.email_address or "N/A" }}</td>
+                            <td>
+                                <a href="{{ url_for('edit_owner', owner_id=owner.owner_id) }}"
+                                    class="btn btn-sm btn-outline-primary">
+                                     Edit
+                               </a>
+                            </td>
+                            
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="5" class="text-center">
+                            <td colspan="6" class="text-center">
                                 No owners registered.
                             </td>
                         </tr>
