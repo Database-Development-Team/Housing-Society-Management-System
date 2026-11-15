@@ -1,0 +1,37 @@
+
+# =====================================
+# HSMS - Git Ignore Configuration
+# =====================================
+
+# Python virtual environment
+.venv/
+venv/
+
+# Environment variables and passwords
+.env
+.env.*
+!.env.example
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Python testing and tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local development logs
+*.log
+
+# VS Code local workspace settings
+.vscode/
+
+# Windows temporary files
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
