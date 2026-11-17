@@ -10,7 +10,6 @@ from flask import (
     Flask, abort, flash, jsonify, redirect,
     render_template, request, session, url_for
 )
-
 from db import get_connection
 from decimal import Decimal, InvalidOperation
 
@@ -979,6 +978,85 @@ def delete_house(house_id):
         dependencies=dependencies,
         has_dependencies=has_dependencies,
         csrf_token=session["house_csrf_token"]
+    )
+
+
+# =========================================
+# RESIDENT MANAGEMENT - READ
+# =========================================
+
+def fetch_residents():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    R.RESIDENT_ID,
+                    R.FULL_NAME,
+                    R.RELATION_TYPE,
+                    R.CONTACT_NUMBER,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+
+                    CASE
+                        WHEN R.RELATION_TYPE = 'OWNER'
+                        THEN O.FIRST_NAME || ' ' || O.LAST_NAME
+
+                        WHEN R.RELATION_TYPE = 'TENANT'
+                        THEN T.FULL_NAME
+
+                        ELSE NULL
+                    END AS LINKED_PERSON,
+
+                    TO_CHAR(R.MOVE_IN_DATE, 'YYYY-MM-DD'),
+                    TO_CHAR(R.MOVE_OUT_DATE, 'YYYY-MM-DD')
+
+                FROM RESIDENT R
+
+                JOIN HOUSE H
+                    ON R.HOUSE_ID = H.HOUSE_ID
+
+                LEFT JOIN OWNER O
+                    ON R.OWNER_ID = O.OWNER_ID
+
+                LEFT JOIN TENANT T
+                    ON R.TENANT_ID = T.TENANT_ID
+
+                ORDER BY R.RESIDENT_ID
+            """)
+
+            records = cursor.fetchall()
+
+    residents = []
+
+    for record in records:
+
+        residents.append({
+            "resident_id": record[0],
+            "full_name": record[1],
+            "relation_type": record[2],
+            "contact_number": record[3],
+            "house_no": record[4],
+            "street_number": record[5],
+            "block_name": record[6],
+            "linked_person": record[7],
+            "move_in_date": record[8],
+            "move_out_date": record[9]
+        })
+
+    return residents
+
+
+@app.route("/residents")
+def residents_page():
+
+    residents = fetch_residents()
+
+    return render_template(
+        "residents.html",
+        residents=residents
     )
 
 
