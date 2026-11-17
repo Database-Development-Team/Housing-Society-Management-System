@@ -390,6 +390,60 @@ def delete_owner(owner_id):
         csrf_token=session["owner_csrf_token"]
     )
 
+# -----------------------------------------
+# HOUSE MANAGEMENT - READ
+# -----------------------------------------
+
+def fetch_houses():
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    H.HOUSE_ID,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+                    H.SIZE_IN_MARLA,
+                    H.CONSTRUCTION_STATUS,
+                    H.OCCUPANCY_STATUS,
+                    O.OWNER_ID,
+                    O.FIRST_NAME,
+                    O.LAST_NAME
+                FROM HOUSE H
+                JOIN OWNER O
+                    ON H.OWNER_ID = O.OWNER_ID
+                ORDER BY H.HOUSE_ID
+            """)
+
+            records = cursor.fetchall()
+
+    houses = []
+
+    for record in records:
+        houses.append({
+            "house_id": record[0],
+            "house_no": record[1],
+            "street_number": record[2],
+            "block_name": record[3],
+            "size_in_marla": record[4],
+            "construction_status": record[5],
+            "occupancy_status": record[6],
+            "owner_id": record[7],
+            "owner_name": f"{record[8]} {record[9]}"
+        })
+
+    return houses
+
+
+@app.route("/houses")
+def houses_page():
+    houses = fetch_houses()
+
+    return render_template(
+        "houses.html",
+        houses=houses
+    )
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
