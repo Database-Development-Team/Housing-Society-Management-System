@@ -819,5 +819,168 @@ def edit_house(house_id):
     )
 
 
+# -----------------------------------------
+# HOUSE MANAGEMENT - DELETE
+# -----------------------------------------
+
+@app.route("/houses/<int:house_id>/delete", methods=["GET", "POST"])
+def delete_house(house_id):
+
+    # Create the form security token if it is missing.
+    if "house_csrf_token" not in session:
+        session["house_csrf_token"] = secrets.token_urlsafe(32)
+
+    # Retrieve house details and related record counts.
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT H.HOUSE_NO,
+                       H.STREET_NUMBER,
+                       H.BLOCK_NAME,
+                       O.FIRST_NAME,
+                       O.LAST_NAME
+                FROM HOUSE H
+                JOIN OWNER O
+                    ON H.OWNER_ID = O.OWNER_ID
+                WHERE H.HOUSE_ID = :house_id
+            """, {"house_id": house_id})
+
+            record = cursor.fetchone()
+
+            if record is None:
+                abort(404)
+
+            house = {
+                "house_no": record[0],
+                "street_number": record[1],
+                "block_name": record[2],
+                "owner_name": f"{record[3]} {record[4]}"
+            }
+
+            cursor.execute("""
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM LEASE
+                     WHERE HOUSE_ID = :house_id),
+
+                    (SELECT COUNT(*)
+                     FROM RESIDENT
+                     WHERE HOUSE_ID = :house_id),
+
+                    (SELECT COUNT(*)
+                     FROM VISITOR
+                     WHERE HOUSE_ID = :house_id),
+
+                    (SELECT COUNT(*)
+                     FROM MAINTENANCE_BILL
+                     WHERE HOUSE_ID = :house_id),
+
+                    (SELECT COUNT(*)
+                     FROM COMPLAINT
+                     WHERE HOUSE_ID = :house_id),
+
+                    (SELECT COUNT(*)
+                     FROM BOOKING
+                     WHERE HOUSE_ID = :house_id)
+                FROM DUAL
+            """, {"house_id": house_id})
+
+            counts = cursor.fetchone()
+
+    dependencies = dict(zip(
+        (
+            "Leases",
+            "Residents",
+            "Visitors",
+            "Maintenance Bills",
+            "Complaints",
+            "Bookings"
+        ),
+        counts
+    ))
+
+    total_dependencies = sum(dependencies.values())
+    has_dependencies = total_dependencies > 0
+
+    # GET displays the confirmation page.
+    # POST performs the deletion.
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["house_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        if has_dependencies:
+            flash(
+                "Cannot delete this house because related "
+                "records exist.",
+                "warning"
+            )
+            return redirect(url_for("houses_page"))
+
+        try:
+            with get_connection() as connection:
+                with connection.cursor() as cursor:
+
+                    cursor.execute("""
+                        DELETE FROM HOUSE
+                        WHERE HOUSE_ID = :house_id
+                    """, {"house_id": house_id})
+
+                    deleted_rows = cursor.rowcount
+
+                    if deleted_rows == 1:
+                        connection.commit()
+
+            if deleted_rows == 0:
+                abort(404)
+
+            flash("House deleted successfully!", "success")
+            return redirect(url_for("houses_page"))
+
+        except oracledb.IntegrityError as exc:
+
+            error_code = getattr(exc.args[0], "code", None)
+
+            if error_code == 2292:
+                flash(
+                    "Deletion blocked: the house has "
+                    "related database records.",
+                    "warning"
+                )
+            else:
+                app.logger.exception("House deletion failed")
+                flash(
+                    "Could not delete the house.",
+                    "danger"
+                )
+
+            return redirect(url_for("houses_page"))
+
+        except oracledb.DatabaseError:
+            app.logger.exception("House deletion failed")
+
+            flash(
+                "Database error. House was not deleted.",
+                "danger"
+            )
+
+            return redirect(url_for("houses_page"))
+
+    return render_template(
+        "house_delete.html",
+        house_id=house_id,
+        house=house,
+        dependencies=dependencies,
+        has_dependencies=has_dependencies,
+        csrf_token=session["house_csrf_token"]
+    )
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
