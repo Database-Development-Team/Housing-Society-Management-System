@@ -31,6 +31,20 @@
         Registered properties and their owners
     </p>
 
+<a href="{{ url_for('register_house') }}"
+   class="btn btn-primary mb-3">
+    + Register New House
+</a>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+        <div class="alert alert-{{ category }}" role="alert">
+            {{ message }}
+        </div>
+    {% endfor %}
+{% endwith %}
+
+
     <a href="{{ url_for('owners_page') }}"
        class="btn btn-outline-primary mb-3">
         View Owners

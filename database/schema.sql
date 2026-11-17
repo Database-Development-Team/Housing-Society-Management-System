@@ -624,3 +624,13 @@ START WITH 2
 INCREMENT BY 1
 NOCACHE
 NOCYCLE;
+
+-- =====================================
+-- SEQUENCE: HOUSE ID GENERATION
+-- =====================================
+
+CREATE SEQUENCE SEQ_HOUSE_ID
+START WITH 2
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;

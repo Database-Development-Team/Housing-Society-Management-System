@@ -12,6 +12,7 @@ from flask import (
 )
 
 from db import get_connection
+from decimal import Decimal, InvalidOperation
 
 load_dotenv()
 
@@ -442,6 +443,166 @@ def houses_page():
     return render_template(
         "houses.html",
         houses=houses
+    )
+
+
+# -----------------------------------------
+# HOUSE MANAGEMENT - CREATE
+# -----------------------------------------
+
+@app.route("/houses/new", methods=["GET", "POST"])
+def register_house():
+
+    owners = fetch_owners()
+
+    if "house_csrf_token" not in session:
+        session["house_csrf_token"] = secrets.token_urlsafe(32)
+
+    fields = (
+        "house_no",
+        "street_number",
+        "block_name",
+        "size_in_marla",
+        "construction_status",
+        "owner_id"
+    )
+
+    values = {
+        field: request.form.get(field, "").strip()
+        for field in fields
+    }
+
+    if request.method == "GET":
+        values["construction_status"] = "COMPLETED"
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["house_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        # Normalize location values before saving.
+        values["house_no"] = values["house_no"].upper()
+        values["street_number"] = values["street_number"].upper()
+        values["block_name"] = values["block_name"].upper()
+
+        valid_owner_ids = {
+            str(owner["owner_id"]) for owner in owners
+        }
+
+        allowed_statuses = {
+            "COMPLETED",
+            "UNDER_CONSTRUCTION",
+            "RENOVATING"
+        }
+
+        if any(not values[field] for field in fields):
+            error = "All fields are required."
+
+        elif (
+            len(values["house_no"]) > 20
+            or len(values["street_number"]) > 20
+            or len(values["block_name"]) > 50
+        ):
+            error = "House location information is too long."
+
+        elif values["owner_id"] not in valid_owner_ids:
+            error = "Please select a registered owner."
+
+        elif values["construction_status"] not in allowed_statuses:
+            error = "Invalid construction status."
+
+        else:
+            try:
+                size = Decimal(values["size_in_marla"])
+
+                if (
+                    not size.is_finite()
+                    or size <= 0
+                    or size > Decimal("9999.99")
+                    or size.as_tuple().exponent < -2
+                ):
+                    error = (
+                        "House size must be positive, at most "
+                        "9999.99, with up to two decimal places."
+                    )
+
+            except InvalidOperation:
+                error = "Enter a valid numeric house size."
+
+        if error is None:
+            try:
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        cursor.execute("""
+                            INSERT INTO HOUSE (
+                                HOUSE_ID,
+                                HOUSE_NO,
+                                STREET_NUMBER,
+                                BLOCK_NAME,
+                                SIZE_IN_MARLA,
+                                CONSTRUCTION_STATUS,
+                                OCCUPANCY_STATUS,
+                                OWNER_ID
+                            )
+                            VALUES (
+                                SEQ_HOUSE_ID.NEXTVAL,
+                                :house_no,
+                                :street_number,
+                                :block_name,
+                                :size_in_marla,
+                                :construction_status,
+                                'VACANT',
+                                :owner_id
+                            )
+                        """, {
+                            "house_no": values["house_no"],
+                            "street_number": values["street_number"],
+                            "block_name": values["block_name"],
+                            "size_in_marla": size,
+                            "construction_status":
+                                values["construction_status"],
+                            "owner_id": int(values["owner_id"])
+                        })
+
+                    connection.commit()
+
+                flash("House registered successfully!", "success")
+                return redirect(url_for("houses_page"))
+
+            except oracledb.IntegrityError as exc:
+                error_code = getattr(exc.args[0], "code", None)
+
+                if error_code == 1:
+                    error = (
+                        "This property location already exists, "
+                        "or its generated ID conflicts with a record."
+                    )
+
+                elif error_code == 2291:
+                    error = "The selected owner no longer exists."
+
+                else:
+                    app.logger.exception("House registration failed")
+                    error = "Could not register the house."
+
+            except oracledb.DatabaseError:
+                app.logger.exception("House registration failed")
+                error = "Database error. House was not registered."
+
+    return render_template(
+        "house_form.html",
+        owners=owners,
+        values=values,
+        error=error,
+        csrf_token=session["house_csrf_token"]
     )
 
 
