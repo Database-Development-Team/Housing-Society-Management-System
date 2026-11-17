@@ -1696,5 +1696,212 @@ def edit_resident(resident_id):
         csrf_token=session["resident_csrf_token"]
     )
 
+
+# =========================================
+# RESIDENT MANAGEMENT - DELETE
+# =========================================
+
+def fetch_resident_for_delete(resident_id):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    R.FULL_NAME,
+                    R.RELATION_TYPE,
+                    R.HOUSE_ID,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+                    TO_CHAR(R.MOVE_OUT_DATE, 'YYYY-MM-DD'),
+                    (
+                        SELECT COUNT(*)
+                        FROM VEHICLE V
+                        WHERE V.RESIDENT_ID = R.RESIDENT_ID
+                    ) AS VEHICLE_COUNT
+
+                FROM RESIDENT R
+                JOIN HOUSE H
+                    ON R.HOUSE_ID = H.HOUSE_ID
+
+                WHERE R.RESIDENT_ID = :resident_id
+            """, {
+                "resident_id": resident_id
+            })
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "full_name": row[0],
+        "relation_type": row[1],
+        "house_id": row[2],
+        "house_no": row[3],
+        "street_number": row[4],
+        "block_name": row[5],
+        "move_out_date": row[6],
+        "vehicle_count": row[7]
+    }
+
+
+@app.route(
+    "/residents/<int:resident_id>/delete",
+    methods=["GET", "POST"]
+)
+def delete_resident(resident_id):
+
+    resident = fetch_resident_for_delete(resident_id)
+
+    if resident is None:
+        abort(404)
+
+    if "resident_csrf_token" not in session:
+        session["resident_csrf_token"] = secrets.token_urlsafe(32)
+
+    # GET: Display the confirmation page.
+    if request.method == "GET":
+
+        can_delete = (
+            resident["move_out_date"] is not None
+            and resident["vehicle_count"] == 0
+        )
+
+        return render_template(
+            "resident_delete.html",
+            resident_id=resident_id,
+            resident=resident,
+            can_delete=can_delete,
+            csrf_token=session["resident_csrf_token"]
+        )
+
+    # POST: Validate the form security token.
+    submitted_token = request.form.get("_csrf_token", "")
+
+    if not hmac.compare_digest(
+        session["resident_csrf_token"],
+        submitted_token
+    ):
+        abort(400, "Invalid form security token.")
+
+    error = None
+    deleted_rows = 0
+
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+
+                # First, identify the resident's house.
+                cursor.execute("""
+                    SELECT HOUSE_ID
+                    FROM RESIDENT
+                    WHERE RESIDENT_ID = :resident_id
+                """, {
+                    "resident_id": resident_id
+                })
+
+                house_row = cursor.fetchone()
+
+                if house_row is None:
+                    abort(404)
+
+                house_id = house_row[0]
+
+                # Lock the house first, consistent with
+                # our Resident CREATE and UPDATE routes.
+                cursor.execute("""
+                    SELECT HOUSE_ID
+                    FROM HOUSE
+                    WHERE HOUSE_ID = :house_id
+                    FOR UPDATE
+                """, {
+                    "house_id": house_id
+                })
+
+                if cursor.fetchone() is None:
+                    abort(404)
+
+                # Lock the resident and recheck move-out.
+                cursor.execute("""
+                    SELECT MOVE_OUT_DATE
+                    FROM RESIDENT
+                    WHERE RESIDENT_ID = :resident_id
+                    FOR UPDATE
+                """, {
+                    "resident_id": resident_id
+                })
+
+                current = cursor.fetchone()
+
+                if current is None:
+                    abort(404)
+
+                # Repeat the dependency check at POST time.
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM VEHICLE
+                    WHERE RESIDENT_ID = :resident_id
+                """, {
+                    "resident_id": resident_id
+                })
+
+                vehicle_count = cursor.fetchone()[0]
+
+                if current[0] is None:
+                    error = (
+                        "This resident is still active. "
+                        "Record a move-out date before deletion."
+                    )
+
+                elif vehicle_count > 0:
+                    error = (
+                        "Cannot delete this resident because "
+                        "registered vehicles are linked to them."
+                    )
+
+                else:
+                    cursor.execute("""
+                        DELETE FROM RESIDENT
+                        WHERE RESIDENT_ID = :resident_id
+                          AND MOVE_OUT_DATE IS NOT NULL
+                    """, {
+                        "resident_id": resident_id
+                    })
+
+                    deleted_rows = cursor.rowcount
+
+                    if deleted_rows == 1:
+                        connection.commit()
+
+    except oracledb.IntegrityError as exc:
+
+        error_code = getattr(exc.args[0], "code", None)
+
+        if error_code == 2292:
+            error = (
+                "Deletion blocked because another database "
+                "record references this resident."
+            )
+        else:
+            app.logger.exception("Resident deletion failed")
+            error = "Could not delete the resident."
+
+    except oracledb.DatabaseError:
+
+        app.logger.exception("Resident deletion failed")
+        error = "Database error. Resident was not deleted."
+
+    if error is not None:
+        flash(error, "warning")
+        return redirect(url_for("residents_page"))
+
+    if deleted_rows == 0:
+        abort(404)
+
+    flash("Resident deleted successfully!", "success")
+    return redirect(url_for("residents_page"))
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
