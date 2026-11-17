@@ -13,6 +13,20 @@
         Registered residents and their assigned houses.
     </p>
 
+<a href="{{ url_for('register_resident') }}"
+   class="btn btn-primary mb-3">
+    + Register New Resident
+</a>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+        <div class="alert alert-{{ category }}" role="alert">
+            {{ message }}
+        </div>
+    {% endfor %}
+{% endwith %}
+
+
     <div class="card shadow-sm mt-4">
 
         <div class="card-body">

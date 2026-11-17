@@ -11,6 +11,7 @@ from flask import (
     render_template, request, session, url_for
 )
 from db import get_connection
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 load_dotenv()
@@ -1059,6 +1060,372 @@ def residents_page():
         residents=residents
     )
 
+
+
+# =========================================
+# RESIDENT MANAGEMENT - CREATE
+# =========================================
+
+def fetch_resident_form_options():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT HOUSE_ID, HOUSE_NO,
+                       STREET_NUMBER, BLOCK_NAME
+                FROM HOUSE
+                ORDER BY BLOCK_NAME, STREET_NUMBER, HOUSE_NO
+            """)
+
+            houses = [
+                {
+                    "id": row[0],
+                    "label": f"{row[1]}, Street {row[2]}, {row[3]}"
+                }
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute("""
+                SELECT TENANT_ID, FULL_NAME
+                FROM TENANT
+                ORDER BY FULL_NAME
+            """)
+
+            tenants = [
+                {"id": row[0], "name": row[1]}
+                for row in cursor.fetchall()
+            ]
+
+    return houses, tenants
+
+
+@app.route("/residents/new", methods=["GET", "POST"])
+def register_resident():
+
+    houses, tenants = fetch_resident_form_options()
+
+    if "resident_csrf_token" not in session:
+        session["resident_csrf_token"] = secrets.token_urlsafe(32)
+
+    fields = (
+        "full_name",
+        "cnic_number",
+        "contact_number",
+        "relation_type",
+        "house_id",
+        "tenant_id",
+        "move_in_date"
+    )
+
+    values = {
+        field: request.form.get(field, "").strip()
+        for field in fields
+    }
+
+    if request.method == "GET":
+        values["move_in_date"] = date.today().isoformat()
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["resident_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        cnic = values["cnic_number"].replace("-", "") or None
+        role = values["relation_type"]
+
+        house_ids = {
+            str(house["id"]) for house in houses
+        }
+
+        tenant_ids = {
+            str(tenant["id"]) for tenant in tenants
+        }
+
+        # Validate submitted information.
+        if not values["full_name"] or len(values["full_name"]) > 100:
+            error = "Full name is required (maximum 100 characters)."
+
+        elif cnic and not re.fullmatch(r"[0-9]{13}", cnic):
+            error = "CNIC must contain 13 digits (hyphens are optional)."
+
+        elif len(values["contact_number"]) > 15:
+            error = "Contact number cannot exceed 15 characters."
+
+        elif role not in {"OWNER", "TENANT", "FAMILY_MEMBER", "OTHER"}:
+            error = "Choose a valid relationship type."
+
+        elif values["house_id"] not in house_ids:
+            error = "Choose a registered house."
+
+        elif role == "TENANT" and values["tenant_id"] not in tenant_ids:
+            error = "Choose a registered tenant."
+
+        else:
+            try:
+                if not re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                    values["move_in_date"]
+                ):
+                    raise ValueError
+
+                move_date = date.fromisoformat(values["move_in_date"])
+
+                if move_date > date.today():
+                    error = "Move-in date cannot be in the future."
+
+            except ValueError:
+                error = "Enter a valid move-in date in YYYY-MM-DD format."
+
+        if error is None:
+
+            try:
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        house_id = int(values["house_id"])
+
+                        # Lock the selected house while registering.
+                        cursor.execute("""
+                            SELECT OWNER_ID
+                            FROM HOUSE
+                            WHERE HOUSE_ID = :id
+                            FOR UPDATE
+                        """, {"id": house_id})
+
+                        house_row = cursor.fetchone()
+
+                        if house_row is None:
+                            error = "Selected house no longer exists."
+
+                        else:
+                            house_owner_id = house_row[0]
+
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM RESIDENT
+                                WHERE HOUSE_ID = :id
+                                  AND MOVE_OUT_DATE IS NULL
+                                  AND RELATION_TYPE IN ('OWNER', 'TENANT')
+                            """, {"id": house_id})
+
+                            primary_count = cursor.fetchone()[0]
+
+                            owner_id = None
+                            tenant_id = None
+
+                            if role in {"OWNER", "TENANT"} and primary_count:
+                                error = (
+                                    "This house already has an active "
+                                    "primary resident."
+                                )
+
+                            elif (
+                                role in {"FAMILY_MEMBER", "OTHER"}
+                                and not primary_count
+                            ):
+                                error = (
+                                    "Register an active owner or tenant "
+                                    "resident first."
+                                )
+
+                            elif role == "OWNER":
+
+                                # Owner is determined by the selected house.
+                                owner_id = house_owner_id
+
+                                cursor.execute("""
+                                    SELECT FIRST_NAME || ' ' || LAST_NAME,
+                                           CNIC_NUMBER
+                                    FROM OWNER
+                                    WHERE OWNER_ID = :id
+                                """, {"id": owner_id})
+
+                                person = cursor.fetchone()
+
+                                # An owner must not move in during
+                                # an active lease term.
+                                cursor.execute("""
+                                    SELECT COUNT(*)
+                                    FROM LEASE
+                                    WHERE HOUSE_ID = :id
+                                      AND LEASE_STATUS = 'ACTIVE'
+                                      AND TRUNC(SYSDATE) BETWEEN
+                                          TRUNC(LEASE_START_DATE)
+                                          AND TRUNC(LEASE_END_DATE)
+                                """, {"id": house_id})
+
+                                active_lease = cursor.fetchone()[0]
+
+                                if active_lease:
+                                    error = (
+                                        "An active lease currently "
+                                        "exists for this house."
+                                    )
+
+                                elif (
+                                    person is None
+                                    or not cnic
+                                    or " ".join(
+                                        values["full_name"].upper().split()
+                                    ) != " ".join(
+                                        person[0].upper().split()
+                                    )
+                                    or cnic != person[1].replace("-", "")
+                                ):
+                                    error = (
+                                        "Name and CNIC must match "
+                                        "the house's registered owner."
+                                    )
+
+                            elif role == "TENANT":
+
+                                tenant_id = int(values["tenant_id"])
+
+                                cursor.execute("""
+                                    SELECT FULL_NAME, CNIC_NUMBER
+                                    FROM TENANT
+                                    WHERE TENANT_ID = :id
+                                """, {"id": tenant_id})
+
+                                person = cursor.fetchone()
+
+                                cursor.execute("""
+                                    SELECT COUNT(*)
+                                    FROM LEASE
+                                    WHERE HOUSE_ID = :house_id
+                                      AND TENANT_ID = :tenant_id
+                                      AND LEASE_STATUS = 'ACTIVE'
+                                      AND TRUNC(SYSDATE) BETWEEN
+                                          TRUNC(LEASE_START_DATE)
+                                          AND TRUNC(LEASE_END_DATE)
+                                """, {
+                                    "house_id": house_id,
+                                    "tenant_id": tenant_id
+                                })
+
+                                active_lease = cursor.fetchone()[0]
+
+                                if not active_lease:
+                                    error = (
+                                        "The tenant must have a current "
+                                        "ACTIVE lease for this house."
+                                    )
+
+                                elif (
+                                    person is None
+                                    or not cnic
+                                    or " ".join(
+                                        values["full_name"].upper().split()
+                                    ) != " ".join(
+                                        person[0].upper().split()
+                                    )
+                                    or cnic != person[1].replace("-", "")
+                                ):
+                                    error = (
+                                        "Name and CNIC must match "
+                                        "the selected registered tenant."
+                                    )
+
+                            if error is None:
+
+                                cursor.execute("""
+                                    INSERT INTO RESIDENT (
+                                        RESIDENT_ID,
+                                        FULL_NAME,
+                                        CNIC_NUMBER,
+                                        CONTACT_NUMBER,
+                                        RELATION_TYPE,
+                                        MOVE_IN_DATE,
+                                        HOUSE_ID,
+                                        OWNER_ID,
+                                        TENANT_ID
+                                    )
+                                    VALUES (
+                                        SEQ_RESIDENT_ID.NEXTVAL,
+                                        :name,
+                                        :cnic,
+                                        :phone,
+                                        :role,
+                                        TO_DATE(:move_date, 'YYYY-MM-DD'),
+                                        :house_id,
+                                        :owner_id,
+                                        :tenant_id
+                                    )
+                                """, {
+                                    "name": values["full_name"],
+                                    "cnic": cnic,
+                                    "phone": values["contact_number"] or None,
+                                    "role": role,
+                                    "move_date": values["move_in_date"],
+                                    "house_id": house_id,
+                                    "owner_id": owner_id,
+                                    "tenant_id": tenant_id
+                                })
+
+                                # Synchronize occupancy for primary residents.
+                                if role in {"OWNER", "TENANT"}:
+
+                                    status = (
+                                        "OWNER-OCCUPIED"
+                                        if role == "OWNER"
+                                        else "TENANT-OCCUPIED"
+                                    )
+
+                                    cursor.execute("""
+                                        UPDATE HOUSE
+                                        SET OCCUPANCY_STATUS = :status
+                                        WHERE HOUSE_ID = :house_id
+                                    """, {
+                                        "status": status,
+                                        "house_id": house_id
+                                    })
+
+                                connection.commit()
+
+                if error is None:
+                    flash("Resident registered successfully!", "success")
+                    return redirect(url_for("residents_page"))
+
+            except oracledb.IntegrityError as exc:
+
+                code = getattr(exc.args[0], "code", None)
+
+                if code == 1:
+                    error = (
+                        "Duplicate CNIC or resident ID. "
+                        "Check the existing records and sequence."
+                    )
+
+                elif code == 2291:
+                    error = (
+                        "A linked house, owner, or tenant "
+                        "no longer exists."
+                    )
+
+                else:
+                    app.logger.exception("Resident registration failed")
+                    error = "Could not register the resident."
+
+            except oracledb.DatabaseError:
+                app.logger.exception("Resident registration failed")
+                error = "Database error. Resident was not registered."
+
+    return render_template(
+        "resident_form.html",
+        values=values,
+        houses=houses,
+        tenants=tenants,
+        error=error,
+        csrf_token=session["resident_csrf_token"]
+    )
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

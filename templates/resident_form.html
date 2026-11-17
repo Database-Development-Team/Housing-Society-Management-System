@@ -1,0 +1,230 @@
+
+{% extends "base.html" %}
+
+{% block title %}Register Resident{% endblock %}
+
+{% block content %}
+
+<div class="container py-5" style="max-width: 800px;">
+
+    <h2>Register New Resident</h2>
+
+    <p class="text-muted">
+        Enter resident information and assign a registered house.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {% if not houses %}
+    <div class="alert alert-warning">
+        No houses are registered.
+        Register a house before registering residents.
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mt-4">
+
+        <div class="card-body p-4">
+
+            <form method="POST"
+                  action="{{ url_for('register_resident') }}">
+
+                <input type="hidden"
+                       name="_csrf_token"
+                       value="{{ csrf_token }}">
+
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Full Name *
+                        </label>
+
+                        <input type="text"
+                               name="full_name"
+                               class="form-control"
+                               maxlength="100"
+                               value="{{ values.full_name }}"
+                               required>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            CNIC Number
+                        </label>
+
+                        <input type="text"
+                               name="cnic_number"
+                               class="form-control"
+                               maxlength="15"
+                               placeholder="12345-1234567-1"
+                               value="{{ values.cnic_number }}">
+
+                        <small class="text-muted">
+                            Optional for family members and others.
+                            Required for OWNER and TENANT roles.
+                        </small>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Contact Number
+                        </label>
+
+                        <input type="tel"
+                               name="contact_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.contact_number }}">
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Relation Type *
+                        </label>
+
+                        <select name="relation_type"
+                                class="form-select"
+                                required>
+
+                            <option value="">
+                                Select Relation Type
+                            </option>
+
+                            {% for role in [
+                                "OWNER",
+                                "TENANT",
+                                "FAMILY_MEMBER",
+                                "OTHER"
+                            ] %}
+
+                            <option value="{{ role }}"
+                                {% if values.relation_type == role %}
+                                selected
+                                {% endif %}>
+                                {{ role | replace("_", " ") }}
+                            </option>
+
+                            {% endfor %}
+
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            House *
+                        </label>
+
+                        <select name="house_id"
+                                class="form-select"
+                                required>
+
+                            <option value="">
+                                Select House
+                            </option>
+
+                            {% for house in houses %}
+
+                            <option value="{{ house.id }}"
+                                {% if values.house_id == house.id|string %}
+                                selected
+                                {% endif %}>
+                                {{ house.label }}
+                            </option>
+
+                            {% endfor %}
+
+                        </select>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Registered Tenant
+                        </label>
+
+                        <select name="tenant_id"
+                                class="form-select">
+
+                            <option value="">
+                                Select Tenant (if applicable)
+                            </option>
+
+                            {% for tenant in tenants %}
+
+                            <option value="{{ tenant.id }}"
+                                {% if values.tenant_id == tenant.id|string %}
+                                selected
+                                {% endif %}>
+                                {{ tenant.name }} (ID: {{ tenant.id }})
+                            </option>
+
+                            {% endfor %}
+
+                        </select>
+
+                        <small class="text-muted">
+                            Select only when Relation Type is TENANT.
+                            The tenant must have a current ACTIVE lease
+                            for the chosen house.
+                        </small>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Move-in Date *
+                        </label>
+
+                        <input type="date"
+                               name="move_in_date"
+                               class="form-control"
+                               value="{{ values.move_in_date }}"
+                               required>
+                    </div>
+
+                    <div class="col-12">
+
+                        <div class="alert alert-info mb-0">
+
+                            For OWNER or TENANT, enter the exact
+                            registered name and CNIC.
+
+                            <p class="mb-0 mt-2">
+                                For OWNER, the owner reference is
+                                automatically taken from the selected house.
+                                FAMILY MEMBER and OTHER residents must
+                                have an active primary resident in that house.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="mt-4 d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary"
+                            {% if not houses %}disabled{% endif %}>
+                        Save Resident
+                    </button>
+
+                    <a href="{{ url_for('residents_page') }}"
+                       class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}
