@@ -70,6 +70,7 @@
                             <th>Construction</th>
                             <th>Occupancy</th>
                             <th>Owner</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
 
@@ -84,10 +85,19 @@
                             <td>{{ house.construction_status }}</td>
                             <td>{{ house.occupancy_status }}</td>
                             <td>{{ house.owner_name }}</td>
+
+                            <td>
+                               <a href="{{ url_for('edit_house',
+                                       house_id=house.house_id) }}"
+                                           class="btn btn-sm btn-outline-primary">
+                                             Edit
+                                 </a>
+                             </td>
+
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="8" class="text-center">
+                            <td colspan="9" class="text-center">
                                 No houses registered.
                             </td>
                         </tr>

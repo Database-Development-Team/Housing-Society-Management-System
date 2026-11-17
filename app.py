@@ -606,5 +606,218 @@ def register_house():
     )
 
 
+# -----------------------------------------
+# HOUSE MANAGEMENT - UPDATE
+# -----------------------------------------
+
+@app.route("/houses/<int:house_id>/edit", methods=["GET", "POST"])
+def edit_house(house_id):
+
+    owners = fetch_owners()
+
+    # Fetch the existing house details.
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT HOUSE_NO,
+                       STREET_NUMBER,
+                       BLOCK_NAME,
+                       SIZE_IN_MARLA,
+                       CONSTRUCTION_STATUS,
+                       OCCUPANCY_STATUS,
+                       OWNER_ID
+                FROM HOUSE
+                WHERE HOUSE_ID = :house_id
+            """, {"house_id": house_id})
+
+            house = cursor.fetchone()
+
+    if house is None:
+        abort(404)
+
+    original_owner_id = house[6]
+
+    if "house_csrf_token" not in session:
+        session["house_csrf_token"] = secrets.token_urlsafe(32)
+
+    values = {
+        "house_no": house[0],
+        "street_number": house[1],
+        "block_name": house[2],
+        "size_in_marla": str(house[3]),
+        "construction_status": house[4],
+        "occupancy_status": house[5],
+        "owner_id": str(house[6])
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["house_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        for field in (
+            "house_no",
+            "street_number",
+            "block_name",
+            "size_in_marla",
+            "construction_status",
+            "owner_id"
+        ):
+            values[field] = request.form.get(field, "").strip()
+
+        values["house_no"] = values["house_no"].upper()
+        values["street_number"] = values["street_number"].upper()
+        values["block_name"] = values["block_name"].upper()
+
+        valid_owner_ids = {
+            str(owner["owner_id"]) for owner in owners
+        }
+
+        valid_statuses = {
+            "COMPLETED",
+            "UNDER_CONSTRUCTION",
+            "RENOVATING"
+        }
+
+        if any(not values[field] for field in (
+            "house_no",
+            "street_number",
+            "block_name",
+            "size_in_marla",
+            "construction_status",
+            "owner_id"
+        )):
+            error = "All fields are required."
+
+        elif (
+            len(values["house_no"]) > 20
+            or len(values["street_number"]) > 20
+            or len(values["block_name"]) > 50
+        ):
+            error = "Property location information is too long."
+
+        elif values["construction_status"] not in valid_statuses:
+            error = "Invalid construction status."
+
+        elif values["owner_id"] not in valid_owner_ids:
+            error = "Please select a registered owner."
+
+        else:
+            try:
+                size = Decimal(values["size_in_marla"])
+
+                if (
+                    not size.is_finite()
+                    or size <= 0
+                    or size > Decimal("9999.99")
+                    or size.as_tuple().exponent < -2
+                ):
+                    error = "Enter a valid size up to 9999.99 marla."
+
+            except InvalidOperation:
+                error = "House size must be numeric."
+
+        if error is None:
+
+            try:
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        # Prevent changing the owner while
+                        # resident or lease records exist.
+                        if int(values["owner_id"]) != original_owner_id:
+
+                            cursor.execute("""
+                                SELECT
+                                    (SELECT COUNT(*)
+                                     FROM RESIDENT
+                                     WHERE HOUSE_ID = :house_id)
+                                    +
+                                    (SELECT COUNT(*)
+                                     FROM LEASE
+                                     WHERE HOUSE_ID = :house_id)
+                                FROM DUAL
+                            """, {"house_id": house_id})
+
+                            dependencies = cursor.fetchone()[0]
+
+                            if dependencies > 0:
+                                error = (
+                                    "Cannot change the owner while "
+                                    "resident or lease records exist."
+                                )
+
+                        if error is None:
+                            cursor.execute("""
+                                UPDATE HOUSE
+                                SET HOUSE_NO = :house_no,
+                                    STREET_NUMBER = :street_number,
+                                    BLOCK_NAME = :block_name,
+                                    SIZE_IN_MARLA = :size_in_marla,
+                                    CONSTRUCTION_STATUS =
+                                        :construction_status,
+                                    OWNER_ID = :owner_id
+                                WHERE HOUSE_ID = :house_id
+                            """, {
+                                "house_no": values["house_no"],
+                                "street_number": values["street_number"],
+                                "block_name": values["block_name"],
+                                "size_in_marla": size,
+                                "construction_status":
+                                    values["construction_status"],
+                                "owner_id": int(values["owner_id"]),
+                                "house_id": house_id
+                            })
+
+                            updated_rows = cursor.rowcount
+
+                            if updated_rows == 1:
+                                connection.commit()
+
+                if error is None:
+                    if updated_rows == 0:
+                        abort(404)
+
+                    flash("House updated successfully!", "success")
+                    return redirect(url_for("houses_page"))
+
+            except oracledb.IntegrityError as exc:
+
+                code = getattr(exc.args[0], "code", None)
+
+                if code == 1:
+                    error = (
+                        "Another house already uses this "
+                        "block, street and house number."
+                    )
+
+                elif code == 2291:
+                    error = "Selected owner no longer exists."
+
+                else:
+                    app.logger.exception("House update failed")
+                    error = "Could not update the house."
+
+            except oracledb.DatabaseError:
+                app.logger.exception("House update failed")
+                error = "Database error. House was not updated."
+
+    return render_template(
+        "house_edit.html",
+        house_id=house_id,
+        owners=owners,
+        values=values,
+        error=error,
+        csrf_token=session["house_csrf_token"]
+    )
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
