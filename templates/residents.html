@@ -51,6 +51,7 @@
                             <th>Linked Person</th>
                             <th>Move In</th>
                             <th>Move Out</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
 
@@ -86,12 +87,21 @@
                                 {{ resident.move_out_date or "Currently Residing" }}
                             </td>
 
+<td>
+    <a href="{{ url_for('edit_resident',
+                        resident_id=resident.resident_id) }}"
+       class="btn btn-sm btn-outline-primary">
+        Edit
+    </a>
+</td>
+
+
                         </tr>
 
                         {% else %}
 
                         <tr>
-                            <td colspan="10" class="text-center">
+                            <td colspan="11" class="text-center">
                                 No residents registered.
                             </td>
                         </tr>

@@ -1427,5 +1427,274 @@ def register_resident():
         csrf_token=session["resident_csrf_token"]
     )
 
+
+# =========================================
+# RESIDENT MANAGEMENT - UPDATE
+# =========================================
+
+def fetch_resident_for_edit(resident_id):
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT R.FULL_NAME,
+                       R.CNIC_NUMBER,
+                       R.CONTACT_NUMBER,
+                       R.RELATION_TYPE,
+                       R.HOUSE_ID,
+                       TO_CHAR(R.MOVE_IN_DATE, 'YYYY-MM-DD'),
+                       TO_CHAR(R.MOVE_OUT_DATE, 'YYYY-MM-DD'),
+                       H.HOUSE_NO,
+                       H.STREET_NUMBER,
+                       H.BLOCK_NAME
+                FROM RESIDENT R
+                JOIN HOUSE H ON R.HOUSE_ID = H.HOUSE_ID
+                WHERE R.RESIDENT_ID = :resident_id
+            """, {"resident_id": resident_id})
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "full_name": row[0],
+        "cnic_number": row[1],
+        "contact_number": row[2],
+        "relation_type": row[3],
+        "house_id": row[4],
+        "move_in_date": row[5],
+        "move_out_date": row[6],
+        "house_label": f"House {row[7]}, Street {row[8]}, {row[9]}"
+    }
+
+
+@app.route("/residents/<int:resident_id>/edit", methods=["GET", "POST"])
+def edit_resident(resident_id):
+
+    resident = fetch_resident_for_edit(resident_id)
+
+    if resident is None:
+        abort(404)
+
+    if "resident_csrf_token" not in session:
+        session["resident_csrf_token"] = secrets.token_urlsafe(32)
+
+    editable_identity = resident["relation_type"] in {
+        "FAMILY_MEMBER", "OTHER"
+    }
+
+    values = {
+        "full_name": resident["full_name"],
+        "cnic_number": resident["cnic_number"] or "",
+        "contact_number": resident["contact_number"] or "",
+        "move_out_date": resident["move_out_date"] or ""
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["resident_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        values["contact_number"] = request.form.get(
+            "contact_number", ""
+        ).strip()
+
+        values["move_out_date"] = request.form.get(
+            "move_out_date", ""
+        ).strip()
+
+        if editable_identity:
+            values["full_name"] = request.form.get(
+                "full_name", ""
+            ).strip()
+
+            values["cnic_number"] = request.form.get(
+                "cnic_number", ""
+            ).strip()
+
+        cnic = values["cnic_number"].replace("-", "") or None
+        move_out = values["move_out_date"]
+
+        # Validate editable fields.
+        if editable_identity and not (
+            1 <= len(values["full_name"]) <= 100
+        ):
+            error = "Full name is required (maximum 100 characters)."
+
+        elif editable_identity and values["cnic_number"] and not re.fullmatch(
+            r"(?:[0-9]{13}|[0-9]{5}-[0-9]{7}-[0-9])",
+            values["cnic_number"]
+        ):
+            error = "CNIC must have 13 digits (optional standard hyphens)."
+
+        elif len(values["contact_number"]) > 15:
+            error = "Contact number cannot exceed 15 characters."
+
+        elif (
+            resident["move_out_date"]
+            and move_out != resident["move_out_date"]
+        ):
+            error = "A recorded move-out date cannot be changed or cleared."
+
+        elif move_out:
+            try:
+                if not re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                    move_out
+                ):
+                    raise ValueError("Invalid date format")
+
+                parsed_date = date.fromisoformat(move_out)
+                move_in_date = date.fromisoformat(
+                    resident["move_in_date"]
+                )
+
+                if (
+                    parsed_date < move_in_date
+                    or parsed_date > date.today()
+                ):
+                    error = "Move-out must be between move-in and today."
+
+            except ValueError:
+                error = "Move-out date must be a valid YYYY-MM-DD date."
+
+        if error is None:
+            try:
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        # Use the same house lock as registration.
+                        cursor.execute("""
+                            SELECT HOUSE_ID
+                            FROM HOUSE
+                            WHERE HOUSE_ID = :house_id
+                            FOR UPDATE
+                        """, {"house_id": resident["house_id"]})
+
+                        if cursor.fetchone() is None:
+                            error = "The assigned house no longer exists."
+
+                        else:
+                            cursor.execute("""
+                                SELECT RELATION_TYPE,
+                                       HOUSE_ID,
+                                       TO_CHAR(
+                                           MOVE_OUT_DATE,
+                                           'YYYY-MM-DD'
+                                       )
+                                FROM RESIDENT
+                                WHERE RESIDENT_ID = :resident_id
+                                FOR UPDATE
+                            """, {"resident_id": resident_id})
+
+                            current = cursor.fetchone()
+
+                            if current is None or (
+                                current[0] != resident["relation_type"]
+                                or current[1] != resident["house_id"]
+                                or current[2] != resident["move_out_date"]
+                            ):
+                                error = (
+                                    "Resident details changed. "
+                                    "Reload and try again."
+                                )
+
+                            new_move_out = bool(
+                                move_out
+                                and not resident["move_out_date"]
+                            )
+
+                            primary = resident["relation_type"] in {
+                                "OWNER", "TENANT"
+                            }
+
+                            # A primary resident cannot leave active
+                            # family members or others behind.
+                            if error is None and new_move_out and primary:
+
+                                cursor.execute("""
+                                    SELECT COUNT(*)
+                                    FROM RESIDENT
+                                    WHERE HOUSE_ID = :house_id
+                                      AND RESIDENT_ID <> :resident_id
+                                      AND MOVE_OUT_DATE IS NULL
+                                """, {
+                                    "house_id": resident["house_id"],
+                                    "resident_id": resident_id
+                                })
+
+                                if cursor.fetchone()[0] > 0:
+                                    error = (
+                                        "Move out the other active residents "
+                                        "of this house first."
+                                    )
+
+                            if error is None:
+
+                                cursor.execute("""
+                                    UPDATE RESIDENT
+                                    SET FULL_NAME = :full_name,
+                                        CNIC_NUMBER = :cnic,
+                                        CONTACT_NUMBER = :contact,
+                                        MOVE_OUT_DATE = TO_DATE(
+                                            :move_out, 'YYYY-MM-DD'
+                                        )
+                                    WHERE RESIDENT_ID = :resident_id
+                                """, {
+                                    "full_name": values["full_name"],
+                                    "cnic": cnic,
+                                    "contact":
+                                        values["contact_number"] or None,
+                                    "move_out": move_out or None,
+                                    "resident_id": resident_id
+                                })
+
+                                # The last primary resident has moved out.
+                                if primary and new_move_out:
+                                    cursor.execute("""
+                                        UPDATE HOUSE
+                                        SET OCCUPANCY_STATUS = 'VACANT'
+                                        WHERE HOUSE_ID = :house_id
+                                    """, {
+                                        "house_id": resident["house_id"]
+                                    })
+
+                                connection.commit()
+
+                if error is None:
+                    flash("Resident updated successfully!", "success")
+                    return redirect(url_for("residents_page"))
+
+            except oracledb.IntegrityError as exc:
+                code = getattr(exc.args[0], "code", None)
+
+                if code == 1:
+                    error = "This CNIC is already used by another resident."
+                else:
+                    app.logger.exception("Resident update failed")
+                    error = "Could not update the resident."
+
+            except oracledb.DatabaseError:
+                app.logger.exception("Resident update failed")
+                error = "Database error. Resident was not updated."
+
+    return render_template(
+        "resident_edit.html",
+        resident_id=resident_id,
+        resident=resident,
+        values=values,
+        editable_identity=editable_identity,
+        today=date.today().isoformat(),
+        error=error,
+        csrf_token=session["resident_csrf_token"]
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

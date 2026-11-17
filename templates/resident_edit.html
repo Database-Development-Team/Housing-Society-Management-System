@@ -1,0 +1,146 @@
+
+{% extends "base.html" %}
+
+{% block title %}Edit Resident{% endblock %}
+
+{% block content %}
+
+<div class="container py-5" style="max-width: 800px;">
+
+    <h2>Edit Resident #{{ resident_id }}</h2>
+    <p class="text-muted">
+        Update resident details and record a move-out date.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm">
+        <div class="card-body p-4">
+
+            <form method="POST"
+                  action="{{ url_for('edit_resident',
+                                    resident_id=resident_id) }}">
+
+                <input type="hidden"
+                       name="_csrf_token"
+                       value="{{ csrf_token }}">
+
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+                        <label class="form-label">Full Name</label>
+
+                        <input type="text"
+                               name="full_name"
+                               class="form-control"
+                               maxlength="100"
+                               value="{{ values.full_name }}"
+                               {% if not editable_identity %}readonly{% endif %}
+                               required>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">CNIC Number</label>
+
+                        <input type="text"
+                               name="cnic_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.cnic_number }}"
+                               {% if not editable_identity %}readonly{% endif %}>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Contact Number</label>
+
+                        <input type="tel"
+                               name="contact_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.contact_number }}">
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Relation Type (Read Only)
+                        </label>
+
+                        <input type="text"
+                               class="form-control"
+                               value="{{ resident.relation_type }}"
+                               readonly>
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label">
+                            Assigned House (Read Only)
+                        </label>
+
+                        <input type="text"
+                               class="form-control"
+                               value="{{ resident.house_label }}"
+                               readonly>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Move-in Date (Read Only)
+                        </label>
+
+                        <input type="date"
+                               class="form-control"
+                               value="{{ resident.move_in_date }}"
+                               readonly>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Move-out Date
+                        </label>
+
+                        <input type="date"
+                               name="move_out_date"
+                               class="form-control"
+                               min="{{ resident.move_in_date }}"
+                               max="{{ today }}"
+                               value="{{ values.move_out_date }}"
+                               {% if resident.move_out_date %}readonly{% endif %}>
+                    </div>
+
+                </div>
+
+                <div class="alert alert-info mt-4">
+                    OWNER and TENANT identities are managed through
+                    their linked records.
+
+                    To transfer a resident to another house, record
+                    their move-out and create a new residency record.
+
+                    A recorded move-out date cannot be changed here.
+                </div>
+
+                <div class="d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Update Resident
+                    </button>
+
+                    <a href="{{ url_for('residents_page') }}"
+                       class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+</div>
+
+{% endblock %}
