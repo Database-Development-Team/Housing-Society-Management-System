@@ -3093,5 +3093,628 @@ def register_lease():
         csrf_token=session["lease_csrf_token"]
     )
 
+
+# =========================================
+# LEASE MANAGEMENT - UPDATE
+# =========================================
+
+def fetch_lease_for_edit(lease_id):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    L.HOUSE_ID,
+                    L.TENANT_ID,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+                    H.CONSTRUCTION_STATUS,
+                    H.OCCUPANCY_STATUS,
+                    T.FULL_NAME,
+                    TO_CHAR(L.LEASE_START_DATE, 'YYYY-MM-DD'),
+                    TO_CHAR(L.LEASE_END_DATE, 'YYYY-MM-DD'),
+                    L.RENT_AMOUNT,
+                    L.POLICE_VERIFICATION_STATUS,
+                    L.LEASE_STATUS
+
+                FROM LEASE L
+
+                JOIN HOUSE H
+                    ON H.HOUSE_ID = L.HOUSE_ID
+
+                JOIN TENANT T
+                    ON T.TENANT_ID = L.TENANT_ID
+
+                WHERE L.LEASE_ID = :lease_id
+            """, {"lease_id": lease_id})
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "house_id": row[0],
+        "tenant_id": row[1],
+        "house_no": row[2],
+        "street_number": row[3],
+        "block_name": row[4],
+        "construction_status": row[5],
+        "occupancy_status": row[6],
+        "tenant_name": row[7],
+        "start_date": row[8],
+        "end_date": row[9],
+        "rent_amount": str(row[10]),
+        "police_status": row[11],
+        "lease_status": row[12]
+    }
+
+
+@app.route(
+    "/leases/<int:lease_id>/edit",
+    methods=["GET", "POST"]
+)
+def edit_lease(lease_id):
+
+    lease = fetch_lease_for_edit(lease_id)
+
+    if lease is None:
+        abort(404)
+
+    if "lease_csrf_token" not in session:
+        session["lease_csrf_token"] = secrets.token_urlsafe(32)
+
+    today = date.today()
+
+    # Start with the values currently stored in Oracle.
+    values = {
+        "start_date": lease["start_date"],
+        "end_date": lease["end_date"],
+        "rent_amount": lease["rent_amount"],
+        "police_status": lease["police_status"],
+        "lease_status": lease["lease_status"]
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get(
+            "_csrf_token", ""
+        )
+
+        if not hmac.compare_digest(
+            session["lease_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        for field in values:
+            values[field] = request.form.get(
+                field, ""
+            ).strip()
+
+        # ---------------------------------
+        # VALIDATE DATES
+        # ---------------------------------
+
+        start_date = None
+        end_date = None
+
+        try:
+
+            if not (
+                re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                    values["start_date"]
+                )
+                and re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                    values["end_date"]
+                )
+            ):
+                raise ValueError("Invalid format")
+
+            start_date = date.fromisoformat(
+                values["start_date"]
+            )
+
+            end_date = date.fromisoformat(
+                values["end_date"]
+            )
+
+            if end_date <= start_date:
+                error = (
+                    "Lease end date must be "
+                    "later than start date."
+                )
+
+        except ValueError:
+            error = "Enter valid lease dates."
+
+        # ---------------------------------
+        # VALIDATE RENT
+        # ---------------------------------
+
+        rent_amount = None
+
+        if error is None:
+
+            if not re.fullmatch(
+                r"[0-9]{1,8}(\.[0-9]{1,2})?",
+                values["rent_amount"]
+            ):
+                error = (
+                    "Rent must be a positive amount "
+                    "with at most two decimal places."
+                )
+
+            else:
+
+                try:
+                    rent_amount = Decimal(
+                        values["rent_amount"]
+                    )
+
+                    if rent_amount <= 0:
+                        error = "Rent must be greater than zero."
+
+                except InvalidOperation:
+                    error = "Invalid rent amount."
+
+        # ---------------------------------
+        # VALIDATE STATUSES
+        # ---------------------------------
+
+        if error is None:
+
+            if values["police_status"] not in (
+                "PENDING",
+                "VERIFIED",
+                "REJECTED"
+            ):
+                error = "Invalid police verification status."
+
+            elif values["lease_status"] not in (
+                "PENDING",
+                "ACTIVE",
+                "EXPIRED",
+                "TERMINATED"
+            ):
+                error = "Invalid lease status."
+
+        # ---------------------------------
+        # DATABASE UPDATE
+        # ---------------------------------
+
+        if error is None:
+
+            try:
+
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        house_id = lease["house_id"]
+
+                        # Lock HOUSE first, consistent
+                        # with Lease CREATE and Resident
+                        # Management operations.
+                        cursor.execute("""
+                            SELECT
+                                CONSTRUCTION_STATUS,
+                                OCCUPANCY_STATUS
+                            FROM HOUSE
+                            WHERE HOUSE_ID = :house_id
+                            FOR UPDATE
+                        """, {
+                            "house_id": house_id
+                        })
+
+                        house_row = cursor.fetchone()
+
+                        if house_row is None:
+                            abort(404)
+
+                        construction_status = house_row[0]
+                        occupancy_status = house_row[1]
+
+                        # Lock and reread the lease.
+                        cursor.execute("""
+                            SELECT
+                                TO_CHAR(
+                                    LEASE_START_DATE,
+                                    'YYYY-MM-DD'
+                                ),
+                                TO_CHAR(
+                                    LEASE_END_DATE,
+                                    'YYYY-MM-DD'
+                                ),
+                                RENT_AMOUNT,
+                                POLICE_VERIFICATION_STATUS,
+                                LEASE_STATUS
+
+                            FROM LEASE
+
+                            WHERE LEASE_ID = :lease_id
+                              AND HOUSE_ID = :house_id
+
+                            FOR UPDATE
+                        """, {
+                            "lease_id": lease_id,
+                            "house_id": house_id
+                        })
+
+                        current = cursor.fetchone()
+
+                        if current is None:
+                            abort(404)
+
+                        old_start = current[0]
+                        old_end = current[1]
+                        old_rent = Decimal(str(current[2]))
+                        old_police = current[3]
+                        old_status = current[4]
+
+                        new_status = values["lease_status"]
+                        new_police = values["police_status"]
+
+                        # ---------------------------------
+                        # TERMINAL STATUS PROTECTION
+                        # ---------------------------------
+
+                        if old_status in (
+                            "EXPIRED",
+                            "TERMINATED"
+                        ):
+                            error = (
+                                "This agreement is closed "
+                                "and cannot be edited."
+                            )
+
+                        # ---------------------------------
+                        # ALLOWED STATUS TRANSITIONS
+                        # ---------------------------------
+
+                        allowed_transitions = {
+                            "PENDING": (
+                                "PENDING",
+                                "ACTIVE",
+                                "TERMINATED"
+                            ),
+                            "ACTIVE": (
+                                "ACTIVE",
+                                "EXPIRED",
+                                "TERMINATED"
+                            )
+                        }
+
+                        if (
+                            error is None
+                            and new_status not in
+                            allowed_transitions.get(
+                                old_status, ()
+                            )
+                        ):
+                            error = (
+                                "This lease status "
+                                "transition is not allowed."
+                            )
+
+                        # ---------------------------------
+                        # POLICE VERIFICATION PROTECTION
+                        # ---------------------------------
+
+                        if (
+                            error is None
+                            and old_police != "PENDING"
+                            and new_police != old_police
+                        ):
+                            error = (
+                                "Completed police verification "
+                                "cannot be changed."
+                            )
+
+                        # ---------------------------------
+                        # ACTIVE LEASE FIELD PROTECTION
+                        # ---------------------------------
+
+                        if (
+                            error is None
+                            and old_status == "ACTIVE"
+                        ):
+
+                            if (
+                                values["start_date"] != old_start
+                                or values["end_date"] != old_end
+                                or rent_amount != old_rent
+                                or new_police != old_police
+                            ):
+                                error = (
+                                    "Dates, rent and verification "
+                                    "cannot be edited after "
+                                    "lease activation."
+                                )
+
+                        # ---------------------------------
+                        # CHECK ACTIVE RESIDENTS
+                        # ---------------------------------
+
+                        if error is None:
+
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM RESIDENT
+                                WHERE HOUSE_ID = :house_id
+                                  AND MOVE_OUT_DATE IS NULL
+                            """, {
+                                "house_id": house_id
+                            })
+
+                            active_residents = (
+                                cursor.fetchone()[0]
+                            )
+
+                        # ---------------------------------
+                        # ACTIVATE PENDING LEASE
+                        # ---------------------------------
+
+                        if (
+                            error is None
+                            and old_status == "PENDING"
+                            and new_status == "ACTIVE"
+                        ):
+
+                            if old_police != "VERIFIED":
+                                error = (
+                                    "Save police verification "
+                                    "as VERIFIED before "
+                                    "activating the lease."
+                                )
+
+                            elif not (
+                                start_date <= today <= end_date
+                            ):
+                                error = (
+                                    "A lease can only become "
+                                    "ACTIVE during its "
+                                    "valid date range."
+                                )
+
+                            elif construction_status != "COMPLETED":
+                                error = (
+                                    "The house must be "
+                                    "fully constructed."
+                                )
+
+                            elif (
+                                occupancy_status != "VACANT"
+                                or active_residents > 0
+                            ):
+                                error = (
+                                    "The house must be vacant "
+                                    "with no active residents "
+                                    "before lease activation."
+                                )
+
+                            else:
+
+                                cursor.execute("""
+                                    SELECT COUNT(*)
+                                    FROM LEASE
+                                    WHERE HOUSE_ID = :house_id
+                                      AND LEASE_ID <> :lease_id
+                                      AND LEASE_STATUS = 'ACTIVE'
+                                """, {
+                                    "house_id": house_id,
+                                    "lease_id": lease_id
+                                })
+
+                                if cursor.fetchone()[0] > 0:
+                                    error = (
+                                        "Another ACTIVE lease "
+                                        "already exists for "
+                                        "this house."
+                                    )
+
+                        # ---------------------------------
+                        # CLOSE ACTIVE LEASE
+                        # ---------------------------------
+
+                        if (
+                            error is None
+                            and old_status == "ACTIVE"
+                            and new_status in (
+                                "EXPIRED",
+                                "TERMINATED"
+                            )
+                        ):
+
+                            if active_residents > 0:
+                                error = (
+                                    "Move out all active "
+                                    "residents before "
+                                    "closing the lease."
+                                )
+
+                            elif occupancy_status != "VACANT":
+                                error = (
+                                    "House occupancy must "
+                                    "be VACANT before "
+                                    "closing the lease."
+                                )
+
+                            elif (
+                                new_status == "EXPIRED"
+                                and today <= end_date
+                            ):
+                                error = (
+                                    "The lease end date "
+                                    "has not passed. Use "
+                                    "TERMINATED for an "
+                                    "early closure."
+                                )
+
+                        # ---------------------------------
+                        # PREVENT OVERLAPPING AGREEMENTS
+                        # ---------------------------------
+
+                        if (
+                            error is None
+                            and old_status == "PENDING"
+                            and new_status in (
+                                "PENDING",
+                                "ACTIVE"
+                            )
+                        ):
+
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM LEASE
+
+                                WHERE HOUSE_ID = :house_id
+                                  AND TENANT_ID = :tenant_id
+                                  AND LEASE_ID <> :lease_id
+
+                                  AND LEASE_STATUS IN (
+                                      'PENDING', 'ACTIVE'
+                                  )
+
+                                  AND LEASE_START_DATE <=
+                                      TO_DATE(
+                                          :end_date,
+                                          'YYYY-MM-DD'
+                                      )
+
+                                  AND LEASE_END_DATE >=
+                                      TO_DATE(
+                                          :start_date,
+                                          'YYYY-MM-DD'
+                                      )
+                            """, {
+                                "house_id": house_id,
+                                "tenant_id": lease["tenant_id"],
+                                "lease_id": lease_id,
+                                "start_date": values["start_date"],
+                                "end_date": values["end_date"]
+                            })
+
+                            if cursor.fetchone()[0] > 0:
+                                error = (
+                                    "Another overlapping "
+                                    "agreement exists for "
+                                    "this house and tenant."
+                                )
+
+                        # ---------------------------------
+                        # EXECUTE UPDATE
+                        # ---------------------------------
+
+                        if error is None:
+
+                            cursor.execute("""
+                                UPDATE LEASE
+
+                                SET LEASE_START_DATE =
+                                    TO_DATE(
+                                        :start_date,
+                                        'YYYY-MM-DD'
+                                    ),
+
+                                    LEASE_END_DATE =
+                                    TO_DATE(
+                                        :end_date,
+                                        'YYYY-MM-DD'
+                                    ),
+
+                                    RENT_AMOUNT = :rent_amount,
+
+                                    POLICE_VERIFICATION_STATUS =
+                                        :police_status,
+
+                                    LEASE_STATUS =
+                                        :lease_status
+
+                                WHERE LEASE_ID = :lease_id
+                            """, {
+                                "start_date": values["start_date"],
+                                "end_date": values["end_date"],
+                                "rent_amount": rent_amount,
+                                "police_status": new_police,
+                                "lease_status": new_status,
+                                "lease_id": lease_id
+                            })
+
+                            connection.commit()
+
+                if error is None:
+
+                    flash(
+                        "Lease updated successfully!",
+                        "success"
+                    )
+
+                    return redirect(url_for("leases_page"))
+
+            except oracledb.IntegrityError as exc:
+
+                error_code = getattr(
+                    exc.args[0], "code", None
+                )
+
+                if error_code == 1:
+                    error = (
+                        "Another ACTIVE lease already "
+                        "exists for this house."
+                    )
+
+                elif error_code == 2290:
+                    error = (
+                        "The change violates a "
+                        "database validation rule."
+                    )
+
+                else:
+                    app.logger.exception(
+                        "Lease update failed"
+                    )
+                    error = "Could not update the lease."
+
+            except oracledb.DatabaseError:
+
+                app.logger.exception(
+                    "Lease update failed"
+                )
+
+                error = "Database error. Lease was not updated."
+
+    # Options for the dropdowns.
+    status_options = []
+
+    if lease["lease_status"] == "PENDING":
+
+        status_options = ["PENDING", "TERMINATED"]
+
+        if lease["police_status"] == "VERIFIED":
+            status_options.insert(1, "ACTIVE")
+
+    elif lease["lease_status"] == "ACTIVE":
+
+        status_options = ["ACTIVE", "TERMINATED"]
+
+        if today > date.fromisoformat(lease["end_date"]):
+            status_options.insert(1, "EXPIRED")
+
+    return render_template(
+        "lease_edit.html",
+        lease_id=lease_id,
+        lease=lease,
+        values=values,
+        status_options=status_options,
+        error=error,
+        csrf_token=session["lease_csrf_token"]
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
