@@ -3716,5 +3716,327 @@ def edit_lease(lease_id):
         csrf_token=session["lease_csrf_token"]
     )
 
+
+# =========================================
+# LEASE MANAGEMENT - DELETE
+# =========================================
+
+def fetch_lease_for_delete(lease_id):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    L.HOUSE_ID,
+                    L.TENANT_ID,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+                    T.FULL_NAME,
+                    TO_CHAR(
+                        L.LEASE_START_DATE,
+                        'YYYY-MM-DD'
+                    ),
+                    TO_CHAR(
+                        L.LEASE_END_DATE,
+                        'YYYY-MM-DD'
+                    ),
+                    L.RENT_AMOUNT,
+                    L.POLICE_VERIFICATION_STATUS,
+                    L.LEASE_STATUS,
+                    (
+                        SELECT COUNT(*)
+                        FROM RESIDENT R
+                        WHERE R.HOUSE_ID = L.HOUSE_ID
+                          AND R.TENANT_ID = L.TENANT_ID
+                    ) AS RELATED_RESIDENT_COUNT
+
+                FROM LEASE L
+
+                JOIN HOUSE H
+                    ON H.HOUSE_ID = L.HOUSE_ID
+
+                JOIN TENANT T
+                    ON T.TENANT_ID = L.TENANT_ID
+
+                WHERE L.LEASE_ID = :lease_id
+            """, {
+                "lease_id": lease_id
+            })
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "house_id": row[0],
+        "tenant_id": row[1],
+        "house_no": row[2],
+        "street_number": row[3],
+        "block_name": row[4],
+        "tenant_name": row[5],
+        "start_date": row[6],
+        "end_date": row[7],
+        "rent_amount": row[8],
+        "police_status": row[9],
+        "lease_status": row[10],
+        "related_resident_count": row[11]
+    }
+
+
+@app.route(
+    "/leases/<int:lease_id>/delete",
+    methods=["GET", "POST"]
+)
+def delete_lease(lease_id):
+
+    lease = fetch_lease_for_delete(lease_id)
+
+    if lease is None:
+        abort(404)
+
+    # Reuse the CSRF token from Lease Management.
+    if "lease_csrf_token" not in session:
+        session["lease_csrf_token"] = secrets.token_urlsafe(32)
+
+    can_delete = (
+        lease["lease_status"] == "PENDING"
+        and lease["police_status"] == "PENDING"
+        and lease["related_resident_count"] == 0
+    )
+
+    # -----------------------------------------
+    # GET - SHOW DELETE CONFIRMATION
+    # -----------------------------------------
+
+    if request.method == "GET":
+
+        return render_template(
+            "lease_delete.html",
+            lease_id=lease_id,
+            lease=lease,
+            can_delete=can_delete,
+            csrf_token=session["lease_csrf_token"]
+        )
+
+    # -----------------------------------------
+    # POST - VALIDATE CSRF
+    # -----------------------------------------
+
+    submitted_token = request.form.get(
+        "_csrf_token", ""
+    )
+
+    if not hmac.compare_digest(
+        session["lease_csrf_token"],
+        submitted_token
+    ):
+        abort(400, "Invalid form security token.")
+
+    error = None
+    deleted_rows = 0
+
+    try:
+
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+
+                # Identify the house before locking.
+                cursor.execute("""
+                    SELECT HOUSE_ID
+                    FROM LEASE
+                    WHERE LEASE_ID = :lease_id
+                """, {
+                    "lease_id": lease_id
+                })
+
+                house_row = cursor.fetchone()
+
+                if house_row is None:
+                    abort(404)
+
+                house_id = house_row[0]
+
+                # Lock HOUSE first, consistent with
+                # our existing Lease workflows.
+                cursor.execute("""
+                    SELECT HOUSE_ID
+                    FROM HOUSE
+                    WHERE HOUSE_ID = :house_id
+                    FOR UPDATE
+                """, {
+                    "house_id": house_id
+                })
+
+                if cursor.fetchone() is None:
+                    abort(404)
+
+                # Lock and reread the lease.
+                cursor.execute("""
+                    SELECT
+                        HOUSE_ID,
+                        TENANT_ID,
+                        LEASE_STATUS,
+                        POLICE_VERIFICATION_STATUS
+
+                    FROM LEASE
+
+                    WHERE LEASE_ID = :lease_id
+
+                    FOR UPDATE
+                """, {
+                    "lease_id": lease_id
+                })
+
+                current = cursor.fetchone()
+
+                if current is None:
+                    abort(404)
+
+                current_house_id = current[0]
+                tenant_id = current[1]
+                lease_status = current[2]
+                police_status = current[3]
+
+                if current_house_id != house_id:
+
+                    error = (
+                        "Lease information changed. "
+                        "Reload the page and try again."
+                    )
+
+                # ---------------------------------
+                # CHECK LEASE STATUS
+                # ---------------------------------
+
+                elif lease_status != "PENDING":
+
+                    error = (
+                        "Only PENDING leases can "
+                        "be permanently deleted."
+                    )
+
+                # ---------------------------------
+                # CHECK POLICE VERIFICATION
+                # ---------------------------------
+
+                elif police_status != "PENDING":
+
+                    error = (
+                        "This lease has already entered "
+                        "the verification process. "
+                        "Keep its history instead "
+                        "of deleting it."
+                    )
+
+                # ---------------------------------
+                # CHECK RELATED RESIDENT HISTORY
+                # ---------------------------------
+
+                else:
+
+                    cursor.execute("""
+                        SELECT COUNT(*)
+                        FROM RESIDENT
+                        WHERE HOUSE_ID = :house_id
+                          AND TENANT_ID = :tenant_id
+                    """, {
+                        "house_id": house_id,
+                        "tenant_id": tenant_id
+                    })
+
+                    related_residents = (
+                        cursor.fetchone()[0]
+                    )
+
+                    if related_residents > 0:
+
+                        error = (
+                            "Cannot delete this agreement "
+                            "because resident history exists "
+                            "for the selected house and tenant."
+                        )
+
+                # ---------------------------------
+                # EXECUTE DELETE
+                # ---------------------------------
+
+                if error is None:
+
+                    cursor.execute("""
+                        DELETE FROM LEASE
+
+                        WHERE LEASE_ID = :lease_id
+                          AND LEASE_STATUS = 'PENDING'
+                          AND POLICE_VERIFICATION_STATUS =
+                              'PENDING'
+                    """, {
+                        "lease_id": lease_id
+                    })
+
+                    deleted_rows = cursor.rowcount
+
+                    if deleted_rows == 1:
+                        connection.commit()
+                    else:
+                        error = (
+                            "Lease could not be deleted. "
+                            "Please refresh and try again."
+                        )
+
+    except oracledb.IntegrityError as exc:
+
+        error_code = getattr(
+            exc.args[0], "code", None
+        )
+
+        if error_code == 2292:
+
+            error = (
+                "Deletion blocked because another "
+                "database record references this lease."
+            )
+
+        else:
+
+            app.logger.exception(
+                "Lease deletion failed"
+            )
+
+            error = "Could not delete the lease."
+
+    except oracledb.DatabaseError:
+
+        app.logger.exception(
+            "Lease deletion failed"
+        )
+
+        error = (
+            "Database error. "
+            "Lease was not deleted."
+        )
+
+    if error is not None:
+
+        flash(error, "warning")
+
+        return redirect(
+            url_for("leases_page")
+        )
+
+    if deleted_rows != 1:
+        abort(404)
+
+    flash(
+        "Lease deleted successfully!",
+        "success"
+    )
+
+    return redirect(
+        url_for("leases_page")
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

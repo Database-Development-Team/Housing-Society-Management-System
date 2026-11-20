@@ -86,6 +86,7 @@
 
                             <td>{{ lease.lease_status }}</td>
 
+
 <td>
     <div class="d-flex flex-nowrap gap-2">
 
@@ -93,6 +94,12 @@
                             lease_id=lease.lease_id) }}"
            class="btn btn-sm btn-outline-primary">
             Edit
+        </a>
+
+        <a href="{{ url_for('delete_lease',
+                            lease_id=lease.lease_id) }}"
+           class="btn btn-sm btn-outline-danger">
+            Delete
         </a>
 
     </div>
