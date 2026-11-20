@@ -648,3 +648,12 @@ START WITH 2
 INCREMENT BY 1
 NOCACHE
 NOCYCLE;
+-- =====================================
+-- LEASE ID SEQUENCE
+-- =====================================
+
+CREATE SEQUENCE SEQ_LEASE_ID
+START WITH 2
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;

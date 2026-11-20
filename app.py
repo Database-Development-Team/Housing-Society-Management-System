@@ -2708,5 +2708,390 @@ def leases_page():
         leases=leases
     )
 
+
+# =========================================
+# LEASE MANAGEMENT - CREATE
+# =========================================
+
+def fetch_lease_form_options():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            # Fetch available registered houses.
+            cursor.execute("""
+                SELECT
+                    HOUSE_ID,
+                    HOUSE_NO,
+                    STREET_NUMBER,
+                    BLOCK_NAME,
+                    OCCUPANCY_STATUS
+                FROM HOUSE
+                ORDER BY BLOCK_NAME,
+                         STREET_NUMBER,
+                         HOUSE_NO
+            """)
+
+            house_records = cursor.fetchall()
+
+            # Fetch registered tenants.
+            cursor.execute("""
+                SELECT TENANT_ID, FULL_NAME
+                FROM TENANT
+                ORDER BY FULL_NAME, TENANT_ID
+            """)
+
+            tenant_records = cursor.fetchall()
+
+    houses = [
+        {
+            "house_id": row[0],
+            "house_no": row[1],
+            "street_number": row[2],
+            "block_name": row[3],
+            "occupancy_status": row[4]
+        }
+        for row in house_records
+    ]
+
+    tenants = [
+        {
+            "tenant_id": row[0],
+            "full_name": row[1]
+        }
+        for row in tenant_records
+    ]
+
+    return houses, tenants
+
+
+@app.route("/leases/new", methods=["GET", "POST"])
+def register_lease():
+
+    if "lease_csrf_token" not in session:
+        session["lease_csrf_token"] = secrets.token_urlsafe(32)
+
+    houses, tenants = fetch_lease_form_options()
+
+    fields = (
+        "house_id",
+        "tenant_id",
+        "start_date",
+        "end_date",
+        "rent_amount"
+    )
+
+    values = {
+        field: request.form.get(field, "").strip()
+        for field in fields
+    }
+
+    error = None
+
+    # Default start date for a fresh form.
+    if request.method == "GET":
+        values["start_date"] = date.today().isoformat()
+
+    if request.method == "POST":
+
+        # ---------------------------------
+        # CSRF VALIDATION
+        # ---------------------------------
+
+        submitted_token = request.form.get(
+            "_csrf_token", ""
+        )
+
+        if not hmac.compare_digest(
+            session["lease_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        # ---------------------------------
+        # VALIDATE HOUSE AND TENANT IDs
+        # ---------------------------------
+
+        if not re.fullmatch(
+            r"[0-9]{1,18}", values["house_id"]
+        ):
+            error = "Select a valid house."
+
+        elif not re.fullmatch(
+            r"[0-9]{1,18}", values["tenant_id"]
+        ):
+            error = "Select a valid tenant."
+
+        # ---------------------------------
+        # VALIDATE DATES
+        # ---------------------------------
+
+        start_date = None
+        end_date = None
+
+        if error is None:
+
+            try:
+                if not (
+                    re.fullmatch(
+                        r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                        values["start_date"]
+                    )
+                    and re.fullmatch(
+                        r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                        values["end_date"]
+                    )
+                ):
+                    raise ValueError("Invalid date format")
+
+                start_date = date.fromisoformat(
+                    values["start_date"]
+                )
+
+                end_date = date.fromisoformat(
+                    values["end_date"]
+                )
+
+                if end_date <= start_date:
+                    error = (
+                        "Lease end date must be "
+                        "later than start date."
+                    )
+
+            except ValueError:
+                error = "Enter valid lease dates."
+
+        # ---------------------------------
+        # VALIDATE RENT AMOUNT
+        # ---------------------------------
+
+        rent_amount = None
+
+        if error is None:
+
+            if not re.fullmatch(
+                r"[0-9]{1,8}(\.[0-9]{1,2})?",
+                values["rent_amount"]
+            ):
+                error = (
+                    "Rent must be a positive amount "
+                    "with at most two decimal places."
+                )
+
+            else:
+                try:
+                    rent_amount = Decimal(
+                        values["rent_amount"]
+                    )
+
+                    if rent_amount <= 0:
+                        error = (
+                            "Rent amount must be "
+                            "greater than zero."
+                        )
+
+                except InvalidOperation:
+                    error = "Invalid rent amount."
+
+        # ---------------------------------
+        # DATABASE INSERT
+        # ---------------------------------
+
+        if error is None:
+
+            house_id = int(values["house_id"])
+            tenant_id = int(values["tenant_id"])
+
+            try:
+
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        # Lock the selected house to
+                        # serialize registrations through
+                        # this application workflow.
+                        cursor.execute("""
+                            SELECT HOUSE_ID
+                            FROM HOUSE
+                            WHERE HOUSE_ID = :house_id
+                            FOR UPDATE
+                        """, {
+                            "house_id": house_id
+                        })
+
+                        if cursor.fetchone() is None:
+                            error = (
+                                "The selected house "
+                                "does not exist."
+                            )
+
+                        # Validate the selected tenant.
+                        if error is None:
+
+                            cursor.execute("""
+                                SELECT TENANT_ID
+                                FROM TENANT
+                                WHERE TENANT_ID = :tenant_id
+                            """, {
+                                "tenant_id": tenant_id
+                            })
+
+                            if cursor.fetchone() is None:
+                                error = (
+                                    "The selected tenant "
+                                    "does not exist."
+                                )
+
+                        # Prevent overlapping open leases
+                        # for the SAME house and tenant.
+                        if error is None:
+
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM LEASE
+                                WHERE HOUSE_ID = :house_id
+                                  AND TENANT_ID = :tenant_id
+
+                                  AND LEASE_STATUS IN (
+                                      'PENDING', 'ACTIVE'
+                                  )
+
+                                  AND LEASE_START_DATE <=
+                                      TO_DATE(
+                                          :end_date,
+                                          'YYYY-MM-DD'
+                                      )
+
+                                  AND LEASE_END_DATE >=
+                                      TO_DATE(
+                                          :start_date,
+                                          'YYYY-MM-DD'
+                                      )
+                            """, {
+                                "house_id": house_id,
+                                "tenant_id": tenant_id,
+                                "start_date": values["start_date"],
+                                "end_date": values["end_date"]
+                            })
+
+                            if cursor.fetchone()[0] > 0:
+                                error = (
+                                    "An overlapping pending "
+                                    "or active lease already "
+                                    "exists for this house "
+                                    "and tenant."
+                                )
+
+                        # Create a PENDING lease.
+                        if error is None:
+
+                            cursor.execute("""
+                                INSERT INTO LEASE (
+                                    LEASE_ID,
+                                    HOUSE_ID,
+                                    TENANT_ID,
+                                    LEASE_START_DATE,
+                                    LEASE_END_DATE,
+                                    RENT_AMOUNT,
+                                    POLICE_VERIFICATION_STATUS,
+                                    LEASE_STATUS
+                                )
+                                VALUES (
+                                    SEQ_LEASE_ID.NEXTVAL,
+                                    :house_id,
+                                    :tenant_id,
+                                    TO_DATE(
+                                        :start_date,
+                                        'YYYY-MM-DD'
+                                    ),
+                                    TO_DATE(
+                                        :end_date,
+                                        'YYYY-MM-DD'
+                                    ),
+                                    :rent_amount,
+                                    'PENDING',
+                                    'PENDING'
+                                )
+                            """, {
+                                "house_id": house_id,
+                                "tenant_id": tenant_id,
+                                "start_date": values["start_date"],
+                                "end_date": values["end_date"],
+                                "rent_amount": rent_amount
+                            })
+
+                            connection.commit()
+
+                if error is None:
+
+                    flash(
+                        "Lease registered successfully!",
+                        "success"
+                    )
+
+                    return redirect(
+                        url_for("leases_page")
+                    )
+
+            except oracledb.IntegrityError as exc:
+
+                error_code = getattr(
+                    exc.args[0], "code", None
+                )
+
+                if error_code == 1:
+                    error = (
+                        "Duplicate lease ID or "
+                        "database uniqueness conflict."
+                    )
+
+                elif error_code == 2291:
+                    error = (
+                        "The selected house or tenant "
+                        "does not exist."
+                    )
+
+                elif error_code == 2290:
+                    error = (
+                        "Lease data violates a "
+                        "database validation rule."
+                    )
+
+                else:
+                    app.logger.exception(
+                        "Lease registration failed"
+                    )
+                    error = "Could not register the lease."
+
+            except oracledb.DatabaseError as exc:
+
+                error_code = getattr(
+                    exc.args[0], "code", None
+                )
+
+                app.logger.exception(
+                    "Lease registration failed"
+                )
+
+                if error_code == 2289:
+                    error = (
+                        "SEQ_LEASE_ID does not exist. "
+                        "Create the lease sequence first."
+                    )
+                else:
+                    error = (
+                        "Database error. "
+                        "Lease was not registered."
+                    )
+
+    return render_template(
+        "lease_form.html",
+        houses=houses,
+        tenants=tenants,
+        values=values,
+        error=error,
+        csrf_token=session["lease_csrf_token"]
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

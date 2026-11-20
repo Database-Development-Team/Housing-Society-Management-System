@@ -1,0 +1,225 @@
+
+{% extends "base.html" %}
+
+{% block title %}Register Lease{% endblock %}
+
+{% block content %}
+
+<div class="container py-5" style="max-width: 850px;">
+
+    <h2>Register New Lease</h2>
+
+    <p class="text-muted">
+        Create a rental agreement between
+        a registered house and tenant.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {% if not houses or not tenants %}
+
+    <div class="alert alert-warning">
+        At least one registered house and
+        one registered tenant are required
+        before creating a lease.
+    </div>
+
+    {% endif %}
+
+    <div class="card shadow-sm mt-4">
+
+        <div class="card-body p-4">
+
+            <form method="POST"
+                  action="{{ url_for('register_lease') }}">
+
+                <input type="hidden"
+                       name="_csrf_token"
+                       value="{{ csrf_token }}">
+
+                <div class="row g-3">
+
+                    <!-- HOUSE -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Select House *
+                        </label>
+
+                        <select name="house_id"
+                                class="form-select"
+                                required>
+
+                            <option value="">
+                                -- Select House --
+                            </option>
+
+                            {% for house in houses %}
+
+                            <option
+                                value="{{ house.house_id }}"
+                                {% if values.house_id == (house.house_id | string) %}
+                                selected
+                                {% endif %}>
+
+                                House {{ house.house_no }}
+                                - {{ house.block_name }}
+                                - Street {{ house.street_number }}
+                                ({{ house.occupancy_status }})
+
+                            </option>
+
+                            {% endfor %}
+
+                        </select>
+
+                    </div>
+
+                    <!-- TENANT -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Select Tenant *
+                        </label>
+
+                        <select name="tenant_id"
+                                class="form-select"
+                                required>
+
+                            <option value="">
+                                -- Select Tenant --
+                            </option>
+
+                            {% for tenant in tenants %}
+
+                            <option
+                                value="{{ tenant.tenant_id }}"
+                                {% if values.tenant_id == (tenant.tenant_id | string) %}
+                                selected
+                                {% endif %}>
+
+                                {{ tenant.full_name }}
+                                (ID: {{ tenant.tenant_id }})
+
+                            </option>
+
+                            {% endfor %}
+
+                        </select>
+
+                    </div>
+
+                    <!-- START DATE -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Lease Start Date *
+                        </label>
+
+                        <input type="date"
+                               name="start_date"
+                               class="form-control"
+                               value="{{ values.start_date }}"
+                               required>
+
+                    </div>
+
+                    <!-- END DATE -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Lease End Date *
+                        </label>
+
+                        <input type="date"
+                               name="end_date"
+                               class="form-control"
+                               value="{{ values.end_date }}"
+                               required>
+
+                    </div>
+
+                    <!-- RENT -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Rent Amount (PKR) *
+                        </label>
+
+                        <input type="number"
+                               name="rent_amount"
+                               class="form-control"
+                               min="0.01"
+                               max="99999999.99"
+                               step="0.01"
+                               placeholder="35000.00"
+                               value="{{ values.rent_amount }}"
+                               required>
+
+                    </div>
+
+                    <!-- INITIAL STATUS -->
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Initial Lease Status
+                        </label>
+
+                        <input type="text"
+                               class="form-control"
+                               value="PENDING"
+                               readonly>
+
+                    </div>
+
+                </div>
+
+                <div class="alert alert-info mt-4">
+
+                    <strong>Important:</strong>
+
+                    The new agreement will initially be
+                    registered with PENDING lease status
+                    and PENDING police verification.
+
+                    House occupancy will not change
+                    automatically.
+
+                </div>
+
+                <div class="d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary"
+                            {% if not houses or not tenants %}
+                            disabled
+                            {% endif %}>
+                        Save Lease
+                    </button>
+
+                    <a href="{{ url_for('leases_page') }}"
+                       class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
