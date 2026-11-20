@@ -2151,5 +2151,291 @@ def register_tenant():
         csrf_token=session["tenant_csrf_token"]
     )
 
+
+# =========================================
+# TENANT MANAGEMENT - UPDATE
+# =========================================
+
+def fetch_tenant_for_edit(tenant_id):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    T.FULL_NAME,
+                    T.CNIC_NUMBER,
+                    T.CONTACT_NUMBER,
+                    NVL(T.FAMILY_MEMBERS_COUNT, 0),
+                    T.ADDRESS_PROOF,
+                    TO_CHAR(
+                        T.REGISTRATION_DATE,
+                        'YYYY-MM-DD'
+                    ),
+                    (
+                        SELECT COUNT(*)
+                        FROM RESIDENT R
+                        WHERE R.TENANT_ID = T.TENANT_ID
+                    ) AS RESIDENT_COUNT,
+                    (
+                        SELECT COUNT(*)
+                        FROM LEASE L
+                        WHERE L.TENANT_ID = T.TENANT_ID
+                    ) AS LEASE_COUNT
+
+                FROM TENANT T
+                WHERE T.TENANT_ID = :tenant_id
+            """, {"tenant_id": tenant_id})
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "full_name": row[0],
+        "cnic_number": row[1],
+        "contact_number": row[2],
+        "family_members_count": row[3],
+        "address_proof": row[4],
+        "registration_date": row[5],
+        "resident_count": row[6],
+        "lease_count": row[7]
+    }
+
+
+@app.route("/tenants/<int:tenant_id>/edit", methods=["GET", "POST"])
+def edit_tenant(tenant_id):
+
+    tenant = fetch_tenant_for_edit(tenant_id)
+
+    if tenant is None:
+        abort(404)
+
+    if "tenant_csrf_token" not in session:
+        session["tenant_csrf_token"] = secrets.token_urlsafe(32)
+
+    values = {
+        "full_name": tenant["full_name"],
+        "cnic_number": tenant["cnic_number"],
+        "contact_number": tenant["contact_number"] or "",
+        "family_members_count":
+            str(tenant["family_members_count"]),
+        "address_proof": tenant["address_proof"] or ""
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["tenant_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        fields = (
+            "full_name",
+            "cnic_number",
+            "contact_number",
+            "family_members_count",
+            "address_proof"
+        )
+
+        values = {
+            field: request.form.get(field, "").strip()
+            for field in fields
+        }
+
+        cnic = values["cnic_number"].replace("-", "")
+
+        # ---------------------------------
+        # INPUT VALIDATION
+        # ---------------------------------
+
+        if not values["full_name"]:
+            error = "Full name is required."
+
+        elif len(values["full_name"]) > 100:
+            error = "Full name cannot exceed 100 characters."
+
+        elif not re.fullmatch(
+            r"(?:[0-9]{13}|[0-9]{5}-[0-9]{7}-[0-9])",
+            values["cnic_number"]
+        ):
+            error = (
+                "CNIC must contain 13 digits "
+                "with optional standard hyphens."
+            )
+
+        elif len(values["contact_number"]) > 15:
+            error = "Contact number cannot exceed 15 characters."
+
+        elif not re.fullmatch(
+            r"[0-9]{1,3}",
+            values["family_members_count"]
+        ):
+            error = (
+                "Family members count must be "
+                "between 0 and 999."
+            )
+
+        elif len(values["address_proof"]) > 255:
+            error = "Address proof reference is too long."
+
+        # ---------------------------------
+        # DATABASE UPDATE
+        # ---------------------------------
+
+        if error is None:
+
+            try:
+                updated_rows = 0
+
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        # Lock the tenant while updating.
+                        cursor.execute("""
+                            SELECT FULL_NAME, CNIC_NUMBER
+                            FROM TENANT
+                            WHERE TENANT_ID = :tenant_id
+                            FOR UPDATE
+                        """, {"tenant_id": tenant_id})
+
+                        current = cursor.fetchone()
+
+                        if current is None:
+                            abort(404)
+
+                        # Recheck linked residents.
+                        cursor.execute("""
+                            SELECT COUNT(*)
+                            FROM RESIDENT
+                            WHERE TENANT_ID = :tenant_id
+                        """, {"tenant_id": tenant_id})
+
+                        resident_count = cursor.fetchone()[0]
+
+                        original_name = current[0]
+                        original_cnic = current[1]
+                        original_normalized_cnic = (
+                            original_cnic.replace("-", "")
+                        )
+
+                        # Linked resident identities are protected.
+                        if resident_count > 0:
+
+                            if (
+                                values["full_name"] != original_name
+                                or cnic != original_normalized_cnic
+                            ):
+                                error = (
+                                    "Cannot change name or CNIC "
+                                    "while resident records are linked."
+                                )
+
+                            new_name = original_name
+                            new_cnic = original_cnic
+
+                        else:
+                            new_name = values["full_name"]
+                            new_cnic = cnic
+
+                        # Check for duplicate normalized CNIC
+                        # when the tenant's CNIC is changing.
+                        if (
+                            error is None
+                            and new_cnic.replace("-", "")
+                                != original_normalized_cnic
+                        ):
+
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM TENANT
+                                WHERE TENANT_ID <> :tenant_id
+                                  AND REPLACE(
+                                      CNIC_NUMBER, '-', ''
+                                  ) = :cnic
+                            """, {
+                                "tenant_id": tenant_id,
+                                "cnic": new_cnic
+                            })
+
+                            if cursor.fetchone()[0] > 0:
+                                error = (
+                                    "Another tenant already uses "
+                                    "this CNIC."
+                                )
+
+                        if error is None:
+
+                            cursor.execute("""
+                                UPDATE TENANT
+                                SET FULL_NAME = :full_name,
+                                    CNIC_NUMBER = :cnic_number,
+                                    CONTACT_NUMBER = :contact_number,
+                                    FAMILY_MEMBERS_COUNT = :family_count,
+                                    ADDRESS_PROOF = :address_proof
+                                WHERE TENANT_ID = :tenant_id
+                            """, {
+                                "full_name": new_name,
+                                "cnic_number": new_cnic,
+                                "contact_number":
+                                    values["contact_number"] or None,
+                                "family_count":
+                                    int(values["family_members_count"]),
+                                "address_proof":
+                                    values["address_proof"] or None,
+                                "tenant_id": tenant_id
+                            })
+
+                            updated_rows = cursor.rowcount
+
+                            if updated_rows == 1:
+                                connection.commit()
+
+                if error is None:
+
+                    if updated_rows == 0:
+                        abort(404)
+
+                    flash(
+                        "Tenant updated successfully!",
+                        "success"
+                    )
+
+                    return redirect(url_for("tenants_page"))
+
+            except oracledb.IntegrityError as exc:
+
+                error_code = getattr(exc.args[0], "code", None)
+
+                if error_code == 1:
+                    error = (
+                        "This CNIC is already used "
+                        "by another tenant."
+                    )
+
+                else:
+                    app.logger.exception("Tenant update failed")
+                    error = "Could not update the tenant."
+
+            except oracledb.DatabaseError:
+
+                app.logger.exception("Tenant update failed")
+                error = "Database error. Tenant was not updated."
+
+    return render_template(
+        "tenant_edit.html",
+        tenant_id=tenant_id,
+        tenant=tenant,
+        values=values,
+        error=error,
+        csrf_token=session["tenant_csrf_token"]
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

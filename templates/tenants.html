@@ -47,6 +47,7 @@
                             <th>Family Members</th>
                             <th>Lease Records</th>
                             <th>Registration Date</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
 
@@ -76,12 +77,21 @@
                                 {{ tenant.registration_date or "N/A" }}
                             </td>
 
+
+                               <td>
+                                    <a href="{{ url_for('edit_tenant',
+                                          tenant_id=tenant.tenant_id) }}"
+                                          class="btn btn-sm btn-outline-primary">
+                                       Edit
+                                    </a>
+                                </td>
+
                         </tr>
 
                         {% else %}
 
                         <tr>
-                            <td colspan="6" class="text-center">
+                            <td colspan="7" class="text-center">
                                 No tenants registered.
                             </td>
                         </tr>

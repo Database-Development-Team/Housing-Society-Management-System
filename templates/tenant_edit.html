@@ -1,0 +1,166 @@
+
+{% extends "base.html" %}
+
+{% block title %}Edit Tenant{% endblock %}
+
+{% block content %}
+
+<div class="container py-5" style="max-width: 800px;">
+
+    <h2>Edit Tenant #{{ tenant_id }}</h2>
+
+    <p class="text-muted">
+        Update existing tenant information.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm">
+        <div class="card-body p-4">
+
+            <form method="POST"
+                  action="{{ url_for(
+                      'edit_tenant',
+                      tenant_id=tenant_id
+                  ) }}">
+
+                <input type="hidden"
+                       name="_csrf_token"
+                       value="{{ csrf_token }}">
+
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Full Name *
+                        </label>
+
+                        <input type="text"
+                               name="full_name"
+                               class="form-control"
+                               maxlength="100"
+                               value="{{ values.full_name }}"
+                               {% if tenant.resident_count > 0 %}
+                               readonly
+                               {% endif %}
+                               required>
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            CNIC Number *
+                        </label>
+
+                        <input type="text"
+                               name="cnic_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.cnic_number }}"
+                               {% if tenant.resident_count > 0 %}
+                               readonly
+                               {% endif %}
+                               required>
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Contact Number
+                        </label>
+
+                        <input type="tel"
+                               name="contact_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.contact_number }}">
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Family Members Count *
+                        </label>
+
+                        <input type="number"
+                               name="family_members_count"
+                               class="form-control"
+                               min="0"
+                               max="999"
+                               step="1"
+                               value="{{ values.family_members_count }}"
+                               required>
+                    </div>
+
+                    <div class="col-12">
+
+                        <label class="form-label">
+                            Address Proof Reference
+                        </label>
+
+                        <textarea name="address_proof"
+                                  class="form-control"
+                                  maxlength="255"
+                                  rows="3">{{ values.address_proof }}</textarea>
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Registration Date
+                        </label>
+
+                        <input type="text"
+                               class="form-control"
+                               value="{{ tenant.registration_date or 'N/A' }}"
+                               readonly>
+                    </div>
+
+                </div>
+
+                <div class="alert alert-info mt-4">
+
+                    <p class="mb-1">
+                        Linked leases: {{ tenant.lease_count }}
+                    </p>
+
+                    <p class="mb-0">
+                        Linked residents: {{ tenant.resident_count }}
+                    </p>
+
+                    {% if tenant.resident_count > 0 %}
+                    <p class="mb-0 mt-2">
+                        Name and CNIC are read-only because
+                        resident records reference this tenant.
+                    </p>
+                    {% endif %}
+
+                </div>
+
+                <div class="d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Update Tenant
+                    </button>
+
+                    <a href="{{ url_for('tenants_page') }}"
+                       class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}
