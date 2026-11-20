@@ -1963,5 +1963,193 @@ def tenants_page():
         tenants=tenants
     )
 
+
+# =========================================
+# TENANT MANAGEMENT - CREATE
+# =========================================
+
+@app.route("/tenants/new", methods=["GET", "POST"])
+def register_tenant():
+
+    # Generate a security token for this form.
+    if "tenant_csrf_token" not in session:
+        session["tenant_csrf_token"] = secrets.token_urlsafe(32)
+
+    fields = (
+        "full_name",
+        "cnic_number",
+        "contact_number",
+        "family_members_count",
+        "address_proof"
+    )
+
+    values = {
+        field: request.form.get(field, "").strip()
+        for field in fields
+    }
+
+    if request.method == "GET":
+        values["family_members_count"] = "0"
+
+    error = None
+
+    if request.method == "POST":
+
+        # ---------------------------------
+        # CSRF VALIDATION
+        # ---------------------------------
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["tenant_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        # Normalize CNIC before storing.
+        cnic = values["cnic_number"].replace("-", "")
+
+        # ---------------------------------
+        # INPUT VALIDATION
+        # ---------------------------------
+
+        if not values["full_name"]:
+            error = "Full name is required."
+
+        elif len(values["full_name"]) > 100:
+            error = "Full name cannot exceed 100 characters."
+
+        elif not re.fullmatch(
+            r"(?:[0-9]{13}|[0-9]{5}-[0-9]{7}-[0-9])",
+            values["cnic_number"]
+        ):
+            error = (
+                "Enter a valid 13-digit CNIC, "
+                "with or without standard hyphens."
+            )
+
+        elif len(values["contact_number"]) > 15:
+            error = "Contact number cannot exceed 15 characters."
+
+        elif not re.fullmatch(
+            r"[0-9]{1,3}",
+            values["family_members_count"]
+        ):
+            error = (
+                "Family members count must be "
+                "a whole number from 0 to 999."
+            )
+
+        elif len(values["address_proof"]) > 255:
+            error = "Address proof reference is too long."
+
+        # ---------------------------------
+        # DATABASE INSERT
+        # ---------------------------------
+
+        if error is None:
+
+            try:
+
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        # Check existing CNIC values,
+                        # including previously stored
+                        # hyphenated CNIC numbers.
+                        cursor.execute("""
+                            SELECT COUNT(*)
+                            FROM TENANT
+                            WHERE REPLACE(
+                                CNIC_NUMBER, '-', ''
+                            ) = :cnic
+                        """, {
+                            "cnic": cnic
+                        })
+
+                        existing_count = cursor.fetchone()[0]
+
+                        if existing_count > 0:
+                            error = (
+                                "A tenant with this CNIC "
+                                "is already registered."
+                            )
+
+                        else:
+
+                            cursor.execute("""
+                                INSERT INTO TENANT (
+                                    TENANT_ID,
+                                    FULL_NAME,
+                                    CNIC_NUMBER,
+                                    CONTACT_NUMBER,
+                                    FAMILY_MEMBERS_COUNT,
+                                    ADDRESS_PROOF
+                                )
+                                VALUES (
+                                    SEQ_TENANT_ID.NEXTVAL,
+                                    :full_name,
+                                    :cnic_number,
+                                    :contact_number,
+                                    :family_count,
+                                    :address_proof
+                                )
+                            """, {
+                                "full_name": values["full_name"],
+                                "cnic_number": cnic,
+                                "contact_number":
+                                    values["contact_number"] or None,
+                                "family_count":
+                                    int(values["family_members_count"]),
+                                "address_proof":
+                                    values["address_proof"] or None
+                            })
+
+                            connection.commit()
+
+                if error is None:
+
+                    flash(
+                        "Tenant registered successfully!",
+                        "success"
+                    )
+
+                    return redirect(url_for("tenants_page"))
+
+            except oracledb.IntegrityError as exc:
+
+                error_code = getattr(exc.args[0], "code", None)
+
+                if error_code == 1:
+                    error = (
+                        "Duplicate CNIC or tenant ID. "
+                        "Check existing records and the sequence."
+                    )
+
+                else:
+                    app.logger.exception(
+                        "Tenant registration failed"
+                    )
+                    error = "Could not register the tenant."
+
+            except oracledb.DatabaseError:
+
+                app.logger.exception(
+                    "Tenant registration failed"
+                )
+
+                error = (
+                    "Database error. "
+                    "Tenant was not registered."
+                )
+
+    return render_template(
+        "tenant_form.html",
+        values=values,
+        error=error,
+        csrf_token=session["tenant_csrf_token"]
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

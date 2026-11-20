@@ -639,3 +639,12 @@ START WITH 2
 INCREMENT BY 1
 NOCACHE
 NOCYCLE;
+-- =====================================
+-- TENANT ID SEQUENCE
+-- =====================================
+
+CREATE SEQUENCE SEQ_TENANT_ID
+START WITH 2
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;

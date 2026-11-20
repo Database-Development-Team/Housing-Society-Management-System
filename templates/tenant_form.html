@@ -1,0 +1,150 @@
+
+{% extends "base.html" %}
+
+{% block title %}Register Tenant{% endblock %}
+
+{% block content %}
+
+<div class="container py-5" style="max-width: 800px;">
+
+    <h2>Register New Tenant</h2>
+
+    <p class="text-muted">
+        Enter the tenant's personal and family information.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mt-4">
+        <div class="card-body p-4">
+
+            <form method="POST"
+                  action="{{ url_for('register_tenant') }}">
+
+                <input type="hidden"
+                       name="_csrf_token"
+                       value="{{ csrf_token }}">
+
+                <div class="row g-3">
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Full Name *
+                        </label>
+
+                        <input type="text"
+                               name="full_name"
+                               class="form-control"
+                               maxlength="100"
+                               value="{{ values.full_name }}"
+                               required>
+
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            CNIC Number *
+                        </label>
+
+                        <input type="text"
+                               name="cnic_number"
+                               class="form-control"
+                               placeholder="12345-1234567-1"
+                               maxlength="15"
+                               value="{{ values.cnic_number }}"
+                               required>
+
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Contact Number
+                        </label>
+
+                        <input type="tel"
+                               name="contact_number"
+                               class="form-control"
+                               maxlength="15"
+                               value="{{ values.contact_number }}">
+
+                    </div>
+
+                    <div class="col-md-6">
+
+                        <label class="form-label">
+                            Family Members Count *
+                        </label>
+
+                        <input type="number"
+                               name="family_members_count"
+                               class="form-control"
+                               min="0"
+                               max="999"
+                               step="1"
+                               value="{{ values.family_members_count }}"
+                               required>
+
+                    </div>
+
+                    <div class="col-12">
+
+                        <label class="form-label">
+                            Address Proof Reference
+                        </label>
+
+                        <textarea name="address_proof"
+                                  class="form-control"
+                                  maxlength="255"
+                                  rows="3"
+                                  placeholder="Example: Utility bill verified">{{ values.address_proof }}</textarea>
+
+                        <small class="text-muted">
+                            Enter a short description or reference.
+                            File uploads are not supported yet.
+                        </small>
+
+                    </div>
+
+                </div>
+
+                <div class="alert alert-info mt-4 mb-0">
+
+                    <strong>Important:</strong>
+
+                    Registering a tenant does not automatically
+                    assign a house, create a lease agreement,
+                    or register the tenant as a resident.
+
+                    These operations are managed separately.
+
+                </div>
+
+                <div class="mt-4 d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Save Tenant
+                    </button>
+
+                    <a href="{{ url_for('tenants_page') }}"
+                       class="btn btn-outline-secondary">
+                        Cancel
+                    </a>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}
