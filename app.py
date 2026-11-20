@@ -2437,5 +2437,199 @@ def edit_tenant(tenant_id):
         csrf_token=session["tenant_csrf_token"]
     )
 
+
+# =========================================
+# TENANT MANAGEMENT - DELETE
+# =========================================
+
+def fetch_tenant_for_delete(tenant_id):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    T.FULL_NAME,
+                    T.CONTACT_NUMBER,
+
+                    (SELECT COUNT(*)
+                     FROM LEASE L
+                     WHERE L.TENANT_ID = T.TENANT_ID),
+
+                    (SELECT COUNT(*)
+                     FROM RESIDENT R
+                     WHERE R.TENANT_ID = T.TENANT_ID)
+
+                FROM TENANT T
+                WHERE T.TENANT_ID = :tenant_id
+            """, {
+                "tenant_id": tenant_id
+            })
+
+            row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "full_name": row[0],
+        "contact_number": row[1],
+        "lease_count": row[2],
+        "resident_count": row[3]
+    }
+
+
+@app.route(
+    "/tenants/<int:tenant_id>/delete",
+    methods=["GET", "POST"]
+)
+def delete_tenant(tenant_id):
+
+    tenant = fetch_tenant_for_delete(tenant_id)
+
+    if tenant is None:
+        abort(404)
+
+    # Create a CSRF token if one does not exist.
+    if "tenant_csrf_token" not in session:
+        session["tenant_csrf_token"] = secrets.token_urlsafe(32)
+
+    has_dependencies = (
+        tenant["lease_count"] > 0
+        or tenant["resident_count"] > 0
+    )
+
+    # GET: Show the confirmation page.
+    if request.method == "GET":
+
+        return render_template(
+            "tenant_delete.html",
+            tenant_id=tenant_id,
+            tenant=tenant,
+            has_dependencies=has_dependencies,
+            csrf_token=session["tenant_csrf_token"]
+        )
+
+    # POST: Validate the security token.
+    submitted_token = request.form.get(
+        "_csrf_token", ""
+    )
+
+    if not hmac.compare_digest(
+        session["tenant_csrf_token"],
+        submitted_token
+    ):
+        abort(400, "Invalid form security token.")
+
+    deleted_rows = 0
+    error = None
+
+    try:
+
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+
+                # Lock the tenant before deleting.
+                cursor.execute("""
+                    SELECT TENANT_ID
+                    FROM TENANT
+                    WHERE TENANT_ID = :tenant_id
+                    FOR UPDATE
+                """, {
+                    "tenant_id": tenant_id
+                })
+
+                if cursor.fetchone() is None:
+                    abort(404)
+
+                # Recheck dependencies during POST.
+                cursor.execute("""
+                    SELECT
+
+                        (SELECT COUNT(*)
+                         FROM LEASE
+                         WHERE TENANT_ID = :tenant_id),
+
+                        (SELECT COUNT(*)
+                         FROM RESIDENT
+                         WHERE TENANT_ID = :tenant_id)
+
+                    FROM DUAL
+                """, {
+                    "tenant_id": tenant_id
+                })
+
+                lease_count, resident_count = (
+                    cursor.fetchone()
+                )
+
+                if lease_count > 0 or resident_count > 0:
+
+                    error = (
+                        "Cannot delete this tenant because "
+                        "lease or resident records exist."
+                    )
+
+                else:
+
+                    cursor.execute("""
+                        DELETE FROM TENANT
+                        WHERE TENANT_ID = :tenant_id
+                    """, {
+                        "tenant_id": tenant_id
+                    })
+
+                    deleted_rows = cursor.rowcount
+
+                    if deleted_rows == 1:
+                        connection.commit()
+
+    except oracledb.IntegrityError as exc:
+
+        error_code = getattr(
+            exc.args[0], "code", None
+        )
+
+        if error_code == 2292:
+
+            error = (
+                "Deletion blocked because another "
+                "database record references this tenant."
+            )
+
+        else:
+
+            app.logger.exception(
+                "Tenant deletion failed"
+            )
+
+            error = "Could not delete the tenant."
+
+    except oracledb.DatabaseError:
+
+        app.logger.exception(
+            "Tenant deletion failed"
+        )
+
+        error = (
+            "Database error. "
+            "Tenant was not deleted."
+        )
+
+    if error is not None:
+
+        flash(error, "warning")
+        return redirect(url_for("tenants_page"))
+
+    if deleted_rows == 0:
+        abort(404)
+
+    flash(
+        "Tenant deleted successfully!",
+        "success"
+    )
+
+    return redirect(url_for("tenants_page"))
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
