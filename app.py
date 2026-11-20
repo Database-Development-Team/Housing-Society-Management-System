@@ -2631,5 +2631,82 @@ def delete_tenant(tenant_id):
 
     return redirect(url_for("tenants_page"))
 
+
+# =========================================
+# LEASE MANAGEMENT - READ
+# =========================================
+
+def fetch_leases():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    L.LEASE_ID,
+
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME,
+
+                    T.FULL_NAME,
+
+                    TO_CHAR(
+                        L.LEASE_START_DATE,
+                        'YYYY-MM-DD'
+                    ),
+
+                    TO_CHAR(
+                        L.LEASE_END_DATE,
+                        'YYYY-MM-DD'
+                    ),
+
+                    L.RENT_AMOUNT,
+                    L.POLICE_VERIFICATION_STATUS,
+                    L.LEASE_STATUS
+
+                FROM LEASE L
+
+                JOIN HOUSE H
+                    ON L.HOUSE_ID = H.HOUSE_ID
+
+                JOIN TENANT T
+                    ON L.TENANT_ID = T.TENANT_ID
+
+                ORDER BY L.LEASE_ID
+            """)
+
+            records = cursor.fetchall()
+
+    leases = []
+
+    for record in records:
+
+        leases.append({
+            "lease_id": record[0],
+            "house_no": record[1],
+            "street_number": record[2],
+            "block_name": record[3],
+            "tenant_name": record[4],
+            "start_date": record[5],
+            "end_date": record[6],
+            "rent_amount": record[7],
+            "police_status": record[8],
+            "lease_status": record[9]
+        })
+
+    return leases
+
+
+@app.route("/leases")
+def leases_page():
+
+    leases = fetch_leases()
+
+    return render_template(
+        "leases.html",
+        leases=leases
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

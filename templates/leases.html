@@ -1,0 +1,91 @@
+
+{% extends "base.html" %}
+
+{% block title %}Lease Management{% endblock %}
+
+{% block content %}
+
+<div class="container py-5">
+
+    <h2>Lease Management</h2>
+
+    <p class="text-muted">
+        Rental agreements between registered houses and tenants.
+    </p>
+
+    <div class="card shadow-sm mt-4">
+
+        <div class="card-body">
+
+            <h5 class="mb-3">
+                Total Leases: {{ leases | length }}
+            </h5>
+
+            <div class="table-responsive">
+
+                <table class="table table-striped table-hover">
+
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Lease ID</th>
+                            <th>House No.</th>
+                            <th>Street</th>
+                            <th>Block</th>
+                            <th>Tenant</th>
+                            <th>Start Date</th>
+                            <th>End Date</th>
+                            <th>Rent Amount</th>
+                            <th>Police Verification</th>
+                            <th>Lease Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for lease in leases %}
+
+                        <tr>
+                            <td>{{ lease.lease_id }}</td>
+
+                            <td>{{ lease.house_no }}</td>
+
+                            <td>{{ lease.street_number }}</td>
+
+                            <td>{{ lease.block_name }}</td>
+
+                            <td>{{ lease.tenant_name }}</td>
+
+                            <td>{{ lease.start_date }}</td>
+
+                            <td>{{ lease.end_date }}</td>
+
+                            <td>{{ lease.rent_amount }}</td>
+
+                            <td>{{ lease.police_status }}</td>
+
+                            <td>{{ lease.lease_status }}</td>
+                        </tr>
+
+                        {% else %}
+
+                        <tr>
+                            <td colspan="10" class="text-center">
+                                No lease agreements registered.
+                            </td>
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
