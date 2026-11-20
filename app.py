@@ -1903,5 +1903,65 @@ def delete_resident(resident_id):
     flash("Resident deleted successfully!", "success")
     return redirect(url_for("residents_page"))
 
+
+# =========================================
+# TENANT MANAGEMENT - READ
+# =========================================
+
+def fetch_tenants():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    T.TENANT_ID,
+                    T.FULL_NAME,
+                    T.CONTACT_NUMBER,
+                    NVL(T.FAMILY_MEMBERS_COUNT, 0),
+                    TO_CHAR(
+                        T.REGISTRATION_DATE,
+                        'YYYY-MM-DD'
+                    ),
+
+                    (
+                        SELECT COUNT(*)
+                        FROM LEASE L
+                        WHERE L.TENANT_ID = T.TENANT_ID
+                    ) AS LEASE_COUNT
+
+                FROM TENANT T
+
+                ORDER BY T.TENANT_ID
+            """)
+
+            records = cursor.fetchall()
+
+    tenants = []
+
+    for record in records:
+
+        tenants.append({
+            "tenant_id": record[0],
+            "full_name": record[1],
+            "contact_number": record[2],
+            "family_members_count": record[3],
+            "registration_date": record[4],
+            "lease_count": record[5]
+        })
+
+    return tenants
+
+
+@app.route("/tenants")
+def tenants_page():
+
+    tenants = fetch_tenants()
+
+    return render_template(
+        "tenants.html",
+        tenants=tenants
+    )
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
