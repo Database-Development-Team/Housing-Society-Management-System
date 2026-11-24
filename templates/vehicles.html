@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicle Management{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid px-3 px-lg-4 py-5">
+
+    <h2>Vehicle Management</h2>
+
+    <p class="text-muted">
+        Registered vehicles, parking stickers,
+        and associated resident information.
+    </p>
+
+    <div class="card shadow-sm mt-4">
+
+        <div class="card-body">
+
+            <h5 class="mb-3">
+                Total Vehicles: {{ vehicles | length }}
+            </h5>
+
+            <div class="table-responsive">
+
+                <table class="table table-striped
+                              table-hover align-middle">
+
+                    <thead class="table-dark">
+
+                        <tr>
+                            <th>Vehicle ID</th>
+                            <th>License Plate</th>
+                            <th>Make / Model</th>
+                            <th>Color</th>
+                            <th>Parking Sticker</th>
+                            <th>Sticker Expiry</th>
+                            <th>Sticker Status</th>
+                            <th>Registered Resident</th>
+                            <th>House</th>
+                            <th>Residency Status</th>
+                        </tr>
+
+                    </thead>
+
+                    <tbody>
+
+                        {% for vehicle in vehicles %}
+
+                        <tr>
+
+                            <td>
+                                {{ vehicle.vehicle_id }}
+                            </td>
+
+                            <td class="text-nowrap">
+                                <strong>
+                                    {{ vehicle.license_plate_no }}
+                                </strong>
+                            </td>
+
+                            <td>
+                                {{ vehicle.vehicle_make }}
+
+                                {% if vehicle.vehicle_model %}
+                                    / {{ vehicle.vehicle_model }}
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {{ vehicle.vehicle_color or "N/A" }}
+                            </td>
+
+                            <td>
+                                {{ vehicle.parking_sticker_no
+                                   or "Not Issued" }}
+                            </td>
+
+                            <td class="text-nowrap">
+                                {{ vehicle.sticker_expiry_date
+                                   or "N/A" }}
+                            </td>
+
+                            <td>
+
+                                {% if vehicle.sticker_status == 'VALID' %}
+
+                                    <span class="badge text-bg-success">
+                                        VALID
+                                    </span>
+
+                                {% elif vehicle.sticker_status == 'EXPIRED' %}
+
+                                    <span class="badge text-bg-danger">
+                                        EXPIRED
+                                    </span>
+
+                                {% elif vehicle.sticker_status == 'NOT ISSUED' %}
+
+                                    <span class="badge text-bg-secondary">
+                                        NOT ISSUED
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="badge text-bg-warning">
+                                        NO EXPIRY DATE
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td>
+                                {{ vehicle.resident_name }}
+
+                                <div class="small text-muted">
+                                    ID: {{ vehicle.resident_id }}
+                                </div>
+                            </td>
+
+                            <td class="text-nowrap">
+
+                                House {{ vehicle.house_no }}
+
+                                <div class="small text-muted">
+                                    Street {{ vehicle.street_number }},
+                                    {{ vehicle.block_name }}
+                                </div>
+
+                            </td>
+
+                            <td>
+
+                                {% if vehicle.resident_status == 'CURRENT' %}
+
+                                    <span class="badge text-bg-success">
+                                        CURRENT
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="badge text-bg-secondary">
+                                        MOVED OUT
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                        </tr>
+
+                        {% else %}
+
+                        <tr>
+                            <td colspan="10"
+                                class="text-center py-4">
+
+                                No vehicles registered.
+
+                            </td>
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

@@ -4038,5 +4038,102 @@ def delete_lease(lease_id):
         url_for("leases_page")
     )
 
+
+# =========================================
+# VEHICLE MANAGEMENT - READ
+# =========================================
+
+def fetch_vehicles():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    V.VEHICLE_ID,
+                    V.LICENSE_PLATE_NO,
+                    V.VEHICLE_MAKE,
+                    V.VEHICLE_MODEL,
+                    V.VEHICLE_COLOR,
+                    V.PARKING_STICKER_NO,
+
+                    TO_CHAR(
+                        V.STICKER_EXPIRY_DATE,
+                        'YYYY-MM-DD'
+                    ) AS STICKER_EXPIRY_DATE,
+
+                    CASE
+                        WHEN V.PARKING_STICKER_NO IS NULL
+                            THEN 'NOT ISSUED'
+
+                        WHEN V.STICKER_EXPIRY_DATE IS NULL
+                            THEN 'NO EXPIRY DATE'
+
+                        WHEN TRUNC(V.STICKER_EXPIRY_DATE)
+                             < TRUNC(SYSDATE)
+                            THEN 'EXPIRED'
+
+                        ELSE 'VALID'
+                    END AS STICKER_STATUS,
+
+                    R.RESIDENT_ID,
+                    R.FULL_NAME,
+
+                    CASE
+                        WHEN R.MOVE_OUT_DATE IS NULL
+                            THEN 'CURRENT'
+                        ELSE 'MOVED OUT'
+                    END AS RESIDENT_STATUS,
+
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME
+
+                FROM VEHICLE V
+
+                JOIN RESIDENT R
+                    ON V.RESIDENT_ID = R.RESIDENT_ID
+
+                JOIN HOUSE H
+                    ON R.HOUSE_ID = H.HOUSE_ID
+
+                ORDER BY V.VEHICLE_ID
+            """)
+
+            records = cursor.fetchall()
+
+    vehicles = []
+
+    for record in records:
+
+        vehicles.append({
+            "vehicle_id": record[0],
+            "license_plate_no": record[1],
+            "vehicle_make": record[2],
+            "vehicle_model": record[3],
+            "vehicle_color": record[4],
+            "parking_sticker_no": record[5],
+            "sticker_expiry_date": record[6],
+            "sticker_status": record[7],
+            "resident_id": record[8],
+            "resident_name": record[9],
+            "resident_status": record[10],
+            "house_no": record[11],
+            "street_number": record[12],
+            "block_name": record[13]
+        })
+
+    return vehicles
+
+
+@app.route("/vehicles")
+def vehicles_page():
+
+    vehicles = fetch_vehicles()
+
+    return render_template(
+        "vehicles.html",
+        vehicles=vehicles
+    )
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
