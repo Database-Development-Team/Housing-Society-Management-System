@@ -657,3 +657,13 @@ START WITH 2
 INCREMENT BY 1
 NOCACHE
 NOCYCLE;
+
+-- =========================================
+-- VEHICLE ID SEQUENCE
+-- =========================================
+
+CREATE SEQUENCE SEQ_VEHICLE_ID
+START WITH 3
+INCREMENT BY 1
+NOCACHE
+NOCYCLE;

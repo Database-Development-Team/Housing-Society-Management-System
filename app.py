@@ -4135,5 +4135,395 @@ def vehicles_page():
         "vehicles.html",
         vehicles=vehicles
     )
+
+# =========================================
+# VEHICLE MANAGEMENT - CREATE
+# =========================================
+
+def fetch_vehicle_resident_options():
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute("""
+                SELECT
+                    R.RESIDENT_ID,
+                    R.FULL_NAME,
+                    R.RELATION_TYPE,
+                    H.HOUSE_NO,
+                    H.STREET_NUMBER,
+                    H.BLOCK_NAME
+
+                FROM RESIDENT R
+
+                JOIN HOUSE H
+                    ON R.HOUSE_ID = H.HOUSE_ID
+
+                WHERE R.MOVE_OUT_DATE IS NULL
+
+                ORDER BY R.FULL_NAME
+            """)
+
+            residents = [
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "relation_type": row[2],
+                    "house_no": row[3],
+                    "street_number": row[4],
+                    "block_name": row[5]
+                }
+                for row in cursor.fetchall()
+            ]
+
+    return residents
+
+
+@app.route("/vehicles/new", methods=["GET", "POST"])
+def register_vehicle():
+
+    residents = fetch_vehicle_resident_options()
+
+    # Generate CSRF token.
+    if "vehicle_csrf_token" not in session:
+        session["vehicle_csrf_token"] = secrets.token_urlsafe(32)
+
+    fields = (
+        "license_plate_no",
+        "vehicle_make",
+        "vehicle_model",
+        "vehicle_color",
+        "parking_sticker_no",
+        "sticker_expiry_date",
+        "resident_id"
+    )
+
+    values = {
+        field: request.form.get(field, "").strip()
+        for field in fields
+    }
+
+    error = None
+
+    if request.method == "POST":
+
+        # ---------------------------------
+        # CSRF VALIDATION
+        # ---------------------------------
+
+        submitted_token = request.form.get("_csrf_token", "")
+
+        if not hmac.compare_digest(
+            session["vehicle_csrf_token"],
+            submitted_token
+        ):
+            abort(400, "Invalid form security token.")
+
+        # ---------------------------------
+        # NORMALIZE INPUT
+        # ---------------------------------
+
+        values["license_plate_no"] = (
+            values["license_plate_no"].upper()
+        )
+
+        values["vehicle_make"] = (
+            values["vehicle_make"].upper()
+        )
+
+        values["vehicle_model"] = (
+            values["vehicle_model"].upper()
+        )
+
+        values["vehicle_color"] = (
+            values["vehicle_color"].upper()
+        )
+
+        values["parking_sticker_no"] = (
+            values["parking_sticker_no"].upper()
+        )
+
+        # ---------------------------------
+        # INPUT VALIDATION
+        # ---------------------------------
+
+        if not values["license_plate_no"]:
+
+            error = "License plate number is required."
+
+        elif len(values["license_plate_no"]) > 20:
+
+            error = "License plate cannot exceed 20 characters."
+
+        elif not values["vehicle_make"]:
+
+            error = "Vehicle make is required."
+
+        elif len(values["vehicle_make"]) > 50:
+
+            error = "Vehicle make cannot exceed 50 characters."
+
+        elif len(values["vehicle_model"]) > 50:
+
+            error = "Vehicle model cannot exceed 50 characters."
+
+        elif len(values["vehicle_color"]) > 30:
+
+            error = "Vehicle color cannot exceed 30 characters."
+
+        elif len(values["parking_sticker_no"]) > 30:
+
+            error = "Parking sticker number cannot exceed 30 characters."
+
+        elif not values["resident_id"].isdigit():
+
+            error = "Please select a valid resident."
+
+        elif values["resident_id"] not in {
+            str(resident["id"]) for resident in residents
+        }:
+
+            error = "Please select a current registered resident."
+
+        elif (
+            values["sticker_expiry_date"]
+            and not values["parking_sticker_no"]
+        ):
+
+            error = (
+                "A parking sticker number is required "
+                "when an expiry date is provided."
+            )
+
+        elif (
+            values["parking_sticker_no"]
+            and not values["sticker_expiry_date"]
+        ):
+
+            error = (
+                "Enter an expiry date for the parking sticker."
+            )
+
+        # ---------------------------------
+        # DATE VALIDATION
+        # ---------------------------------
+
+        if error is None and values["sticker_expiry_date"]:
+
+            try:
+
+                if not re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+                    values["sticker_expiry_date"]
+                ):
+                    raise ValueError
+
+                expiry_date = date.fromisoformat(
+                    values["sticker_expiry_date"]
+                )
+
+                if expiry_date < date.today():
+
+                    error = (
+                        "Sticker expiry date cannot be in the past."
+                    )
+
+            except ValueError:
+
+                error = "Enter a valid sticker expiry date."
+
+        # ---------------------------------
+        # DATABASE INSERT
+        # ---------------------------------
+
+        if error is None:
+
+            try:
+
+                with get_connection() as connection:
+                    with connection.cursor() as cursor:
+
+                        resident_id = int(
+                            values["resident_id"]
+                        )
+
+                        # Lock and recheck the resident.
+                        # This prevents registration against
+                        # a resident who moved out after the
+                        # dropdown was loaded.
+
+                        cursor.execute("""
+                            SELECT RESIDENT_ID
+                            FROM RESIDENT
+                            WHERE RESIDENT_ID = :resident_id
+                              AND MOVE_OUT_DATE IS NULL
+                            FOR UPDATE
+                        """, {
+                            "resident_id": resident_id
+                        })
+
+                        resident = cursor.fetchone()
+
+                        if resident is None:
+
+                            error = (
+                                "Selected resident is no longer "
+                                "eligible for vehicle registration."
+                            )
+
+                        else:
+
+                            # Check duplicate license plate.
+                            cursor.execute("""
+                                SELECT COUNT(*)
+                                FROM VEHICLE
+                                WHERE UPPER(LICENSE_PLATE_NO) = :plate
+                            """, {
+                                "plate": values["license_plate_no"]
+                            })
+
+                            plate_count = cursor.fetchone()[0]
+
+                            if plate_count:
+
+                                error = (
+                                    "This license plate is already "
+                                    "registered."
+                                )
+
+                            # Check duplicate sticker number.
+                            if (
+                                error is None
+                                and values["parking_sticker_no"]
+                            ):
+
+                                cursor.execute("""
+                                    SELECT COUNT(*)
+                                    FROM VEHICLE
+                                    WHERE UPPER(PARKING_STICKER_NO) = :sticker
+                                """, {
+                                    "sticker":
+                                        values["parking_sticker_no"]
+                                })
+
+                                sticker_count = cursor.fetchone()[0]
+
+                                if sticker_count:
+
+                                    error = (
+                                        "This parking sticker number "
+                                        "is already assigned."
+                                    )
+
+                            if error is None:
+
+                                cursor.execute("""
+                                    INSERT INTO VEHICLE (
+                                        VEHICLE_ID,
+                                        LICENSE_PLATE_NO,
+                                        VEHICLE_MAKE,
+                                        VEHICLE_MODEL,
+                                        VEHICLE_COLOR,
+                                        PARKING_STICKER_NO,
+                                        STICKER_EXPIRY_DATE,
+                                        RESIDENT_ID
+                                    )
+                                    VALUES (
+                                        SEQ_VEHICLE_ID.NEXTVAL,
+                                        :license_plate,
+                                        :vehicle_make,
+                                        :vehicle_model,
+                                        :vehicle_color,
+                                        :sticker_no,
+                                        TO_DATE(
+                                            :expiry_date,
+                                            'YYYY-MM-DD'
+                                        ),
+                                        :resident_id
+                                    )
+                                """, {
+                                    "license_plate":
+                                        values["license_plate_no"],
+
+                                    "vehicle_make":
+                                        values["vehicle_make"],
+
+                                    "vehicle_model":
+                                        values["vehicle_model"] or None,
+
+                                    "vehicle_color":
+                                        values["vehicle_color"] or None,
+
+                                    "sticker_no":
+                                        values["parking_sticker_no"] or None,
+
+                                    "expiry_date":
+                                        values["sticker_expiry_date"] or None,
+
+                                    "resident_id":
+                                        resident_id
+                                })
+
+                                connection.commit()
+
+                if error is None:
+
+                    flash(
+                        "Vehicle registered successfully!",
+                        "success"
+                    )
+
+                    return redirect(
+                        url_for("vehicles_page")
+                    )
+
+            except oracledb.IntegrityError as exc:
+
+                error_code = getattr(
+                    exc.args[0], "code", None
+                )
+
+                if error_code == 1:
+
+                    error = (
+                        "Duplicate license plate, parking sticker, "
+                        "or vehicle ID. Check the existing records "
+                        "and vehicle sequence."
+                    )
+
+                elif error_code == 2291:
+
+                    error = (
+                        "The selected resident does not exist."
+                    )
+
+                else:
+
+                    app.logger.exception(
+                        "Vehicle registration failed"
+                    )
+
+                    error = "Could not register the vehicle."
+
+            except oracledb.DatabaseError:
+
+                app.logger.exception(
+                    "Vehicle registration failed"
+                )
+
+                error = (
+                    "Database error. Vehicle was not registered."
+                )
+
+    return render_template(
+        "vehicle_form.html",
+        residents=residents,
+        values=values,
+        error=error,
+        csrf_token=session["vehicle_csrf_token"],
+        today=date.today().isoformat()
+        )
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
