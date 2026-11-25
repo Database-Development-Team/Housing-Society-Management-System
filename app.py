@@ -13,13 +13,13 @@ from flask import (
 from db import get_connection
 from datetime import date
 from decimal import Decimal, InvalidOperation
-
+    
 load_dotenv()
-
+    
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ["FLASK_SECRET_KEY"]
-
-
+        
+        
 def fetch_owners():
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -30,9 +30,9 @@ def fetch_owners():
                 ORDER BY OWNER_ID
             """)
             records = cursor.fetchall()
-
+        
     owners = []
-
+        
     for record in records:
         owners.append({
             "owner_id": record[0],
@@ -41,68 +41,68 @@ def fetch_owners():
             "mobile_number": record[3],
             "email_address": record[4]
         })
-
+        
     return owners
-
-
+        
+    
 @app.route("/")
 def home():
     return jsonify({
         "application": "Housing Society Management System",
         "status": "running"
     })
-
-
+        
+        
 @app.route("/owners")
 def owners_page():
     return render_template(
         "owners.html",
         owners=fetch_owners()
     )
-
-
+    
+    
 @app.route("/api/owners")
 def owners_api():
     return jsonify(fetch_owners())
-
-
+        
+        
 @app.route("/owners/new", methods=["GET", "POST"])
 def register_owner():
-
+        
     if "owner_csrf_token" not in session:
         session["owner_csrf_token"] = secrets.token_urlsafe(32)
-
+    
     fields = (
         "first_name", "last_name", "cnic_number",
         "mobile_number", "email_address"
     )
-
+    
     values = {
         field: request.form.get(field, "").strip()
         for field in fields
     }
-
+    
     error = None
-
+    
     if request.method == "POST":
-
+    
         submitted_token = request.form.get("_csrf_token", "")
-
+    
         if not hmac.compare_digest(
             session["owner_csrf_token"],
             submitted_token
         ):
             abort(400, "Invalid form security token.")
-
+    
         first_name = values["first_name"]
         last_name = values["last_name"]
         cnic = values["cnic_number"]
         mobile = values["mobile_number"]
         email = values["email_address"]
-
+    
         if not first_name or not last_name or not cnic:
             error = "First name, last name and CNIC are required."
-
+    
         elif len(first_name) > 50 or len(last_name) > 50:
             error = "Names must not exceed 50 characters."
 
@@ -111,17 +111,17 @@ def register_owner():
             cnic
         ):
             error = "Enter a valid 13-digit CNIC."
-
+        
         elif len(mobile) > 15:
             error = "Mobile number must not exceed 15 characters."
 
         elif len(email) > 100 or (email and "@" not in email):
             error = "Enter a valid email address."
-
+    
         else:
             # Store CNIC consistently without hyphens.
             cnic = cnic.replace("-", "")
-
+        
             try:
                 with get_connection() as connection:
                     with connection.cursor() as cursor:
@@ -151,10 +151,10 @@ def register_owner():
                         })
 
                     connection.commit()
-
+        
                 flash("Owner registered successfully!", "success")
                 return redirect(url_for("owners_page"))
-
+        
             except oracledb.IntegrityError as exc:
                 if exc.args[0].code == 1:
                     error = (
@@ -168,17 +168,17 @@ def register_owner():
             except oracledb.DatabaseError:
                 app.logger.exception("Owner registration failed")
                 error = "Database error. Please try again."
-
+        
     return render_template(
         "owner_form.html",
         values=values,
         error=error,
         csrf_token=session["owner_csrf_token"]
     )
-
+        
 @app.route("/owners/<int:owner_id>/edit", methods=["GET", "POST"])
 def edit_owner(owner_id):
-
+        
     # Retrieve the existing owner.
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -190,14 +190,14 @@ def edit_owner(owner_id):
             """, {"owner_id": owner_id})
 
             owner = cursor.fetchone()
-
+        
     if owner is None:
         abort(404)
-
+        
     # Reuse the form security token.
     if "owner_csrf_token" not in session:
         session["owner_csrf_token"] = secrets.token_urlsafe(32)
-
+            
     values = {
         "first_name": owner[0],
         "last_name": owner[1],
@@ -207,11 +207,11 @@ def edit_owner(owner_id):
     }
 
     error = None
-
+        
     if request.method == "POST":
 
         submitted_token = request.form.get("_csrf_token", "")
-
+        
         if not hmac.compare_digest(
             session["owner_csrf_token"],
             submitted_token
@@ -223,7 +223,7 @@ def edit_owner(owner_id):
             "mobile_number", "email_address"
         ):
             values[field] = request.form.get(field, "").strip()
-
+        
         if not values["first_name"] or not values["last_name"]:
             error = "First and last names are required."
 
@@ -232,10 +232,10 @@ def edit_owner(owner_id):
             or len(values["last_name"]) > 50
         ):
             error = "Names cannot exceed 50 characters."
-
+    
         elif len(values["mobile_number"]) > 15:
             error = "Mobile number is too long."
-
+    
         elif (
             len(values["email_address"]) > 100
             or (
@@ -244,7 +244,7 @@ def edit_owner(owner_id):
             )
         ):
             error = "Enter a valid email address."
-
+    
         else:
             try:
                 with get_connection() as connection:
@@ -267,16 +267,16 @@ def edit_owner(owner_id):
 
                         if cursor.rowcount == 0:
                             abort(404)
-
+        
                     connection.commit()
 
                 flash("Owner updated successfully!", "success")
                 return redirect(url_for("owners_page"))
-
+        
             except oracledb.DatabaseError:
                 app.logger.exception("Owner update failed")
                 error = "Database error. Owner was not updated."
-
+        
     return render_template(
         "owner_edit.html",
         owner_id=owner_id,
@@ -284,26 +284,26 @@ def edit_owner(owner_id):
         error=error,
         csrf_token=session["owner_csrf_token"]
     )
-
+        
 @app.route("/owners/<int:owner_id>/delete", methods=["GET", "POST"])
 def delete_owner(owner_id):
-
+        
     # Create a security token for the confirmation form.
     if "owner_csrf_token" not in session:
         session["owner_csrf_token"] = secrets.token_urlsafe(32)
-
+        
     # Find the owner and check related records.
     with get_connection() as connection:
         with connection.cursor() as cursor:
-
+        
             cursor.execute("""
                 SELECT FIRST_NAME, LAST_NAME
                 FROM OWNER
                 WHERE OWNER_ID = :owner_id
             """, {"owner_id": owner_id})
-
+            
             owner = cursor.fetchone()
-
+                
             if owner is None:
                 abort(404)
 
@@ -312,9 +312,9 @@ def delete_owner(owner_id):
                 FROM HOUSE
                 WHERE OWNER_ID = :owner_id
             """, {"owner_id": owner_id})
-
+        
             house_count = cursor.fetchone()[0]
-
+            
             cursor.execute("""
                 SELECT COUNT(*)
                 FROM RESIDENT
@@ -322,19 +322,19 @@ def delete_owner(owner_id):
             """, {"owner_id": owner_id})
 
             resident_count = cursor.fetchone()[0]
-
+        
     has_dependencies = house_count > 0 or resident_count > 0
-
+            
     if request.method == "POST":
-
+        
         submitted_token = request.form.get("_csrf_token", "")
-
+        
         if not hmac.compare_digest(
             session["owner_csrf_token"],
             submitted_token
         ):
             abort(400, "Invalid form security token.")
-
+        
         if has_dependencies:
             flash(
                 "Cannot delete this owner because related "
@@ -342,27 +342,27 @@ def delete_owner(owner_id):
                 "warning"
             )
             return redirect(url_for("owners_page"))
-
+        
         try:
             with get_connection() as connection:
                 with connection.cursor() as cursor:
-
+        
                     cursor.execute("""
                         DELETE FROM OWNER
                         WHERE OWNER_ID = :owner_id
                     """, {"owner_id": owner_id})
 
                     deleted_rows = cursor.rowcount
-
+            
                 if deleted_rows == 1:
                     connection.commit()
-
+        
             if deleted_rows == 0:
                 abort(404)
-
+        
             flash("Owner deleted successfully!", "success")
             return redirect(url_for("owners_page"))
-
+        
         except oracledb.DatabaseError as exc:
 
             error_code = getattr(exc.args[0], "code", None)
@@ -380,7 +380,7 @@ def delete_owner(owner_id):
                 )
 
             return redirect(url_for("owners_page"))
-
+        
     return render_template(
         "owner_delete.html",
         owner_id=owner_id,
@@ -390,11 +390,11 @@ def delete_owner(owner_id):
         has_dependencies=has_dependencies,
         csrf_token=session["owner_csrf_token"]
     )
-
+        
 # -----------------------------------------
 # HOUSE MANAGEMENT - READ
 # -----------------------------------------
-
+        
 def fetch_houses():
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -415,11 +415,11 @@ def fetch_houses():
                     ON H.OWNER_ID = O.OWNER_ID
                 ORDER BY H.HOUSE_ID
             """)
-
+    
             records = cursor.fetchall()
-
+    
     houses = []
-
+    
     for record in records:
         houses.append({
             "house_id": record[0],
@@ -432,10 +432,10 @@ def fetch_houses():
             "owner_id": record[7],
             "owner_name": f"{record[8]} {record[9]}"
         })
-
+    
     return houses
 
-
+    
 @app.route("/houses")
 def houses_page():
     houses = fetch_houses()
@@ -444,20 +444,20 @@ def houses_page():
         "houses.html",
         houses=houses
     )
-
-
+    
+    
 # -----------------------------------------
 # HOUSE MANAGEMENT - CREATE
 # -----------------------------------------
-
+    
 @app.route("/houses/new", methods=["GET", "POST"])
 def register_house():
-
+    
     owners = fetch_owners()
-
+    
     if "house_csrf_token" not in session:
         session["house_csrf_token"] = secrets.token_urlsafe(32)
-
+    
     fields = (
         "house_no",
         "street_number",
@@ -466,62 +466,62 @@ def register_house():
         "construction_status",
         "owner_id"
     )
-
+    
     values = {
         field: request.form.get(field, "").strip()
         for field in fields
     }
-
+    
     if request.method == "GET":
         values["construction_status"] = "COMPLETED"
-
+    
     error = None
-
+    
     if request.method == "POST":
-
+    
         submitted_token = request.form.get("_csrf_token", "")
-
+    
         if not hmac.compare_digest(
             session["house_csrf_token"],
             submitted_token
         ):
             abort(400, "Invalid form security token.")
-
+    
         # Normalize location values before saving.
         values["house_no"] = values["house_no"].upper()
         values["street_number"] = values["street_number"].upper()
         values["block_name"] = values["block_name"].upper()
-
+    
         valid_owner_ids = {
             str(owner["owner_id"]) for owner in owners
         }
-
+    
         allowed_statuses = {
             "COMPLETED",
             "UNDER_CONSTRUCTION",
             "RENOVATING"
         }
-
+    
         if any(not values[field] for field in fields):
             error = "All fields are required."
-
+    
         elif (
             len(values["house_no"]) > 20
             or len(values["street_number"]) > 20
             or len(values["block_name"]) > 50
         ):
             error = "House location information is too long."
-
+    
         elif values["owner_id"] not in valid_owner_ids:
             error = "Please select a registered owner."
 
         elif values["construction_status"] not in allowed_statuses:
             error = "Invalid construction status."
-
+        
         else:
             try:
                 size = Decimal(values["size_in_marla"])
-
+        
                 if (
                     not size.is_finite()
                     or size <= 0
@@ -535,7 +535,7 @@ def register_house():
 
             except InvalidOperation:
                 error = "Enter a valid numeric house size."
-
+        
         if error is None:
             try:
                 with get_connection() as connection:
@@ -571,24 +571,24 @@ def register_house():
                                 values["construction_status"],
                             "owner_id": int(values["owner_id"])
                         })
-
+    
                     connection.commit()
-
+    
                 flash("House registered successfully!", "success")
                 return redirect(url_for("houses_page"))
-
+    
             except oracledb.IntegrityError as exc:
                 error_code = getattr(exc.args[0], "code", None)
-
+    
                 if error_code == 1:
                     error = (
                         "This property location already exists, "
                         "or its generated ID conflicts with a record."
                     )
-
+        
                 elif error_code == 2291:
                     error = "The selected owner no longer exists."
-
+        
                 else:
                     app.logger.exception("House registration failed")
                     error = "Could not register the house."
@@ -596,7 +596,7 @@ def register_house():
             except oracledb.DatabaseError:
                 app.logger.exception("House registration failed")
                 error = "Database error. House was not registered."
-
+        
     return render_template(
         "house_form.html",
         owners=owners,
@@ -604,17 +604,17 @@ def register_house():
         error=error,
         csrf_token=session["house_csrf_token"]
     )
-
-
+    
+    
 # -----------------------------------------
 # HOUSE MANAGEMENT - UPDATE
 # -----------------------------------------
-
+    
 @app.route("/houses/<int:house_id>/edit", methods=["GET", "POST"])
 def edit_house(house_id):
-
+        
     owners = fetch_owners()
-
+    
     # Fetch the existing house details.
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -629,17 +629,17 @@ def edit_house(house_id):
                 FROM HOUSE
                 WHERE HOUSE_ID = :house_id
             """, {"house_id": house_id})
-
+        
             house = cursor.fetchone()
-
+        
     if house is None:
         abort(404)
-
+        
     original_owner_id = house[6]
-
+        
     if "house_csrf_token" not in session:
         session["house_csrf_token"] = secrets.token_urlsafe(32)
-
+        
     values = {
         "house_no": house[0],
         "street_number": house[1],
@@ -651,9 +651,9 @@ def edit_house(house_id):
     }
 
     error = None
-
+        
     if request.method == "POST":
-
+        
         submitted_token = request.form.get("_csrf_token", "")
 
         if not hmac.compare_digest(
@@ -661,7 +661,7 @@ def edit_house(house_id):
             submitted_token
         ):
             abort(400, "Invalid form security token.")
-
+        
         for field in (
             "house_no",
             "street_number",
@@ -679,13 +679,13 @@ def edit_house(house_id):
         valid_owner_ids = {
             str(owner["owner_id"]) for owner in owners
         }
-
+        
         valid_statuses = {
             "COMPLETED",
             "UNDER_CONSTRUCTION",
             "RENOVATING"
         }
-
+        
         if any(not values[field] for field in (
             "house_no",
             "street_number",
@@ -695,20 +695,20 @@ def edit_house(house_id):
             "owner_id"
         )):
             error = "All fields are required."
-
+        
         elif (
             len(values["house_no"]) > 20
             or len(values["street_number"]) > 20
             or len(values["block_name"]) > 50
         ):
             error = "Property location information is too long."
-
+            
         elif values["construction_status"] not in valid_statuses:
             error = "Invalid construction status."
 
         elif values["owner_id"] not in valid_owner_ids:
             error = "Please select a registered owner."
-
+        
         else:
             try:
                 size = Decimal(values["size_in_marla"])
@@ -725,7 +725,7 @@ def edit_house(house_id):
                 error = "House size must be numeric."
 
         if error is None:
-
+        
             try:
                 with get_connection() as connection:
                     with connection.cursor() as cursor:
