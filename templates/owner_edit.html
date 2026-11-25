@@ -5,6 +5,8 @@
 
 {% block content %}
 
+
+
 <div class="container py-5" style="max-width: 760px;">
 
     <h2>Edit Owner #{{ owner_id }}</h2>
@@ -35,6 +37,11 @@
                                required>
                     </div>
 
+
+
+
+
+                    
                     <div class="col-md-6">
                         <label class="form-label">Last Name</label>
                         <input class="form-control"
@@ -45,6 +52,11 @@
                                required>
                     </div>
 
+
+
+
+
+                    
                     <div class="col-md-6">
                         <label class="form-label">CNIC (Read Only)</label>
                         <input class="form-control"
@@ -53,6 +65,10 @@
                                readonly>
                     </div>
 
+
+
+
+                    
                     <div class="col-md-6">
                         <label class="form-label">Mobile Number</label>
                         <input class="form-control"
@@ -62,6 +78,10 @@
                                value="{{ values.mobile_number }}">
                     </div>
 
+
+
+
+                    
                     <div class="col-12">
                         <label class="form-label">Email Address</label>
                         <input class="form-control"
@@ -71,8 +91,14 @@
                                value="{{ values.email_address }}">
                     </div>
 
+
+
+                    
                 </div>
 
+
+
+                
                 <div class="mt-4 d-flex gap-2">
                     <button type="submit" class="btn btn-primary">
                         Update Owner
@@ -84,6 +110,9 @@
                     </a>
                 </div>
 
+
+
+                
             </form>
 
         </div>
