@@ -5,13 +5,21 @@
 
 {% block content %}
 
+
+
+
 <div class="container py-5" style="max-width: 720px;">
 
     <h2>Delete Owner</h2>
 
     <div class="card shadow-sm mt-4">
+
+
+        
         <div class="card-body p-4">
 
+
+            
             <h5>
                 {{ owner[0] }} {{ owner[1] }}
             </h5>
@@ -32,6 +40,11 @@
                 related house or resident records exist.
             </div>
 
+
+
+
+
+            
             <a href="{{ url_for('owners_page') }}"
                class="btn btn-secondary">
                 Back to Owners
@@ -44,6 +57,10 @@
                 delete this owner?
             </div>
 
+
+
+
+            
             <form method="POST"
                   action="{{ url_for(
                       'delete_owner',
@@ -67,6 +84,11 @@
 
             </form>
 
+
+
+
+
+            
             {% endif %}
 
         </div>
