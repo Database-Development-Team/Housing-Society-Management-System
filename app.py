@@ -921,7 +921,7 @@ def delete_house(house_id):
                 "records exist.",
                 "warning"
             )
-            return redirect(url_for("houses_page"))
+            return redirect(url_for("houses_page"))                                                                        
 
         try:
             with get_connection() as connection:
@@ -952,7 +952,7 @@ def delete_house(house_id):
                     "Deletion blocked: the house has "
                     "related database records.",
                     "warning"
-                )
+                )       
             else:
                 app.logger.exception("House deletion failed")
                 flash(
@@ -960,7 +960,7 @@ def delete_house(house_id):
                     "danger"
                 )
 
-            return redirect(url_for("houses_page"))
+            return redirect(url_for("houses_page"))                                                                                     
 
         except oracledb.DatabaseError:
             app.logger.exception("House deletion failed")
@@ -970,8 +970,8 @@ def delete_house(house_id):
                 "danger"
             )
 
-            return redirect(url_for("houses_page"))
-
+            return redirect(url_for("houses_page"))                                                        
+                                                                                                     
     return render_template(
         "house_delete.html",
         house_id=house_id,
