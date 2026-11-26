@@ -59,7 +59,7 @@
                                maxlength="15"
                                value="{{ values.cnic_number }}"
                                required>
-
+                                                                                                    
                     </div>
 
                     <div class="col-md-6">
@@ -73,7 +73,7 @@
                                class="form-control"
                                maxlength="15"
                                value="{{ values.contact_number }}">
-
+                                                                            
                     </div>
 
                     <div class="col-md-6">
@@ -81,7 +81,7 @@
                         <label class="form-label">
                             Family Members Count *
                         </label>
-
+                                                                                                                                            
                         <input type="number"
                                name="family_members_count"
                                class="form-control"
@@ -98,13 +98,13 @@
                         <label class="form-label">
                             Address Proof Reference
                         </label>
-
+                                                                                                                                                    
                         <textarea name="address_proof"
                                   class="form-control"
                                   maxlength="255"
                                   rows="3"
                                   placeholder="Example: Utility bill verified">{{ values.address_proof }}</textarea>
-
+                                                                                                                                                        
                         <small class="text-muted">
                             Enter a short description or reference.
                             File uploads are not supported yet.
@@ -123,7 +123,7 @@
                     or register the tenant as a resident.
 
                     These operations are managed separately.
-
+                                                                                                            
                 </div>
 
                 <div class="mt-4 d-flex gap-2">
@@ -132,12 +132,12 @@
                             class="btn btn-primary">
                         Save Tenant
                     </button>
-
+                                                                        
                     <a href="{{ url_for('tenants_page') }}"
                        class="btn btn-outline-secondary">
                         Cancel
                     </a>
-
+   
                 </div>
 
             </form>
@@ -146,5 +146,5 @@
     </div>
 
 </div>
-
+                                            
 {% endblock %}
